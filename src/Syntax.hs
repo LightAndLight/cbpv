@@ -1,55 +1,58 @@
-{-# language DataKinds, GADTs #-}
+{-# language DataKinds, GADTs, KindSignatures #-}
+{-# language StandaloneDeriving #-}
 module Syntax where
 
 import Control.Monad (unless)
 
 data Sort = C | V
 
-data TyV
-  = U TyC
-  | Zero
-  | Sum TyV TyV
-  | One
-  | Prod TyV TyV
-  deriving (Eq, Show)
+data Ty (a :: Sort) where
+  -- value types
+  U :: Ty 'C -> Ty 'V
+  Zero :: Ty 'V
+  Sum :: Ty 'V -> Ty 'V -> Ty 'V
+  One :: Ty 'V
+  Prod :: Ty 'V -> Ty 'V -> Ty 'V
 
-data TyC
-  = F TyV
-  | With TyC TyC
-  | Arrow TyV TyC
-  deriving (Eq, Show)
+  -- computation types
+  F :: Ty 'V -> Ty 'C
+  With :: Ty 'C -> Ty 'C -> Ty 'C
+  Arrow :: Ty 'V -> Ty 'C -> Ty 'C
+deriving instance Eq (Ty a)
+deriving instance Show (Ty a)
 
-data V
-  = Var !Int
-  | Thunk C
-  | Inl V TyV
-  | Inr TyV V
-  | MkProd V V
-  | MkOne
-  deriving (Eq, Show)
+data Exp (a :: Sort) where
+  -- values
+  Var :: !Int -> Exp 'V
+  Thunk :: Exp 'C -> Exp 'V
+  Inl :: Exp 'V -> Ty 'V -> Exp 'V
+  Inr :: Ty 'V -> Exp 'V -> Exp 'V
+  MkProd :: Exp 'V -> Exp 'V -> Exp 'V
+  MkOne :: Exp 'V
 
-data C
-  = Return V
-  | MkWith C C
-  | Abs TyV C
-  | Bind C C
-  | Force V
-  | SumElim C C V
-  | ProdElim C V
-  | Fst C
-  | Snd C
-  | App C V
-  deriving (Eq, Show)
+  -- computations
+  Return :: Exp 'V -> Exp 'C
+  MkWith :: Exp 'C -> Exp 'C -> Exp 'C
+  Abs :: Ty 'V -> Exp 'C -> Exp 'C
+  Bind :: Exp 'C -> Exp 'C -> Exp 'C
+  Force :: Exp 'V -> Exp 'C
+  SumElim :: Exp 'C -> Exp 'C -> Exp 'V -> Exp 'C
+  ProdElim :: Exp 'C -> Exp 'V -> Exp 'C
+  Fst :: Exp 'C -> Exp 'C
+  Snd :: Exp 'C -> Exp 'C
+  App :: Exp 'C -> Exp 'V -> Exp 'C
+deriving instance Eq (Exp a)
+deriving instance Show (Exp a)
 
 data TypeError
-  = ExpectedF TyC
-  | ExpectedU TyV
-  | ExpectedSum TyV
-  | ExpectedProd TyV
-  | ExpectedWith TyC
-  | ExpectedArrow TyC
-  | TypeMismatchC TyC TyC
-  | TypeMismatchV TyV TyV
+  = ExpectedF (Ty 'C)
+  | ExpectedU (Ty 'V)
+  | ExpectedSum (Ty 'V)
+  | ExpectedProd (Ty 'V)
+  | ExpectedWith (Ty 'C)
+  | ExpectedArrow (Ty 'C)
+  | TypeMismatchC (Ty 'C) (Ty 'C)
+  | TypeMismatchV (Ty 'V) (Ty 'V)
   | NotInScope Int
   deriving (Eq, Show)
 
@@ -57,124 +60,115 @@ rho :: (Int -> Int) -> (Int -> Int)
 rho _ 0 = 0
 rho f n = f (n-1) + 1
 
-renameC :: (Int -> Int) -> C -> C
-renameC f c =
+rename :: (Int -> Int) -> Exp a -> Exp a
+rename f c =
   case c of
-    Return a -> Return $ renameV f a
-    MkWith a b -> MkWith (renameC f a) (renameC f b)
-    Abs ty a -> Abs ty (renameC (rho f) a)
-    Bind a b -> Bind (renameC f a) (renameC (rho f) b)
-    Force a -> Force $ renameV f a
-    SumElim g h a -> SumElim (renameC (rho f) g) (renameC (rho f) h) (renameV f a)
-    ProdElim g a -> ProdElim (renameC (rho f) g) (renameV f a)
-    Fst a -> Fst $ renameC f a
-    Snd a -> Snd $ renameC f a
-    App a b -> App (renameC f a) (renameV f b)
-
-renameV :: (Int -> Int) -> V -> V
-renameV f v =
-  case v of
     Var a -> Var $ f a
-    Thunk a -> Thunk $ renameC f a
-    Inl a ty -> Inl (renameV f a) ty
-    Inr ty a -> Inr ty (renameV f a)
-    MkProd a b -> MkProd (renameV f a) (renameV f b)
+    Thunk a -> Thunk $ rename f a
+    Inl a ty -> Inl (rename f a) ty
+    Inr ty a -> Inr ty (rename f a)
+    MkProd a b -> MkProd (rename f a) (rename f b)
     MkOne -> MkOne
 
-sigma :: (Int -> V) -> (Int -> V)
+    Return a -> Return $ rename f a
+    MkWith a b -> MkWith (rename f a) (rename f b)
+    Abs ty a -> Abs ty (rename (rho f) a)
+    Bind a b -> Bind (rename f a) (rename (rho f) b)
+    Force a -> Force $ rename f a
+    SumElim g h a -> SumElim (rename (rho f) g) (rename (rho f) h) (rename f a)
+    ProdElim g a -> ProdElim (rename (rho f) g) (rename f a)
+    Fst a -> Fst $ rename f a
+    Snd a -> Snd $ rename f a
+    App a b -> App (rename f a) (rename f b)
+
+sigma :: (Int -> Exp 'V) -> (Int -> Exp 'V)
 sigma _ 0 = Var 0
-sigma f n = renameV (+1) $ f (n-1)
+sigma f n = rename (+1) $ f (n-1)
 
-substC :: (Int -> V) -> C -> C
-substC f c =
+subst :: (Int -> Exp 'V) -> Exp a -> Exp a
+subst f c =
   case c of
-    Return a -> Return $ substV f a
-    MkWith a b -> MkWith (substC f a) (substC f b)
-    Abs ty a -> Abs ty (substC (sigma f) a)
-    Bind a b -> Bind (substC f a) (substC (sigma f) b)
-    Force a -> Force $ substV f a
-    SumElim g h a -> SumElim (substC (sigma f) g) (substC (sigma f) h) (substV f a)
-    ProdElim g a -> ProdElim (substC (sigma f) g) (substV f a)
-    Fst a -> Fst $ substC f a
-    Snd a -> Snd $ substC f a
-    App a b -> App (substC f a) (substV f b)
-
-substV :: (Int -> V) -> V -> V
-substV f v =
-  case v of
     Var a -> f a
-    Thunk a -> Thunk $ substC f a
-    Inl a ty -> Inl (substV f a) ty
-    Inr ty a -> Inr ty (substV f a)
-    MkProd a b -> MkProd (substV f a) (substV f b)
+    Thunk a -> Thunk $ subst f a
+    Inl a ty -> Inl (subst f a) ty
+    Inr ty a -> Inr ty (subst f a)
+    MkProd a b -> MkProd (subst f a) (subst f b)
     MkOne -> MkOne
 
-instC :: C -> V -> C
-instC a b = substC (\x -> if x == 0 then b else Var (x-1)) a
+    Return a -> Return $ subst f a
+    MkWith a b -> MkWith (subst f a) (subst f b)
+    Abs ty a -> Abs ty (subst (sigma f) a)
+    Bind a b -> Bind (subst f a) (subst (sigma f) b)
+    Force a -> Force $ subst f a
+    SumElim g h a -> SumElim (subst (sigma f) g) (subst (sigma f) h) (subst f a)
+    ProdElim g a -> ProdElim (subst (sigma f) g) (subst f a)
+    Fst a -> Fst $ subst f a
+    Snd a -> Snd $ subst f a
+    App a b -> App (subst f a) (subst f b)
 
-inferC :: [TyV] -> C -> Either TypeError TyC
-inferC ctx c =
-  case c of
-    Return a -> F <$> inferV ctx a
-    MkWith a b -> With <$> inferC ctx a <*> inferC ctx b
-    Abs ty a -> Arrow ty <$> inferC ctx a
-    Bind a b -> do
-      aTy <- inferC ctx a
-      case aTy of
-        F i -> inferC (i : ctx) b
-        _ -> Left $ ExpectedF aTy
-    Force a -> do
-      aTy <- inferV ctx a
-      case aTy of
-        U i -> pure i
-        _ -> Left $ ExpectedU aTy
-    SumElim f g a -> do
-      aTy <- inferV ctx a
-      case aTy of
-        Sum x y -> do
-          fTy <- inferC (x : ctx) f
-          gTy <- inferC (y : ctx) g
-          unless (fTy == gTy) . Left $ TypeMismatchC fTy gTy
-          pure fTy
-        _ -> Left $ ExpectedSum aTy
-    ProdElim f a -> do
-      aTy <- inferV ctx a
-      case aTy of
-        Prod x y -> inferC (x : y : ctx) f
-        _ -> Left $ ExpectedProd aTy
-    Fst a -> do
-      aTy <- inferC ctx a
-      case aTy of
-        With x _ -> pure x
-        _ -> Left $ ExpectedWith aTy
-    Snd a -> do
-      aTy <- inferC ctx a
-      case aTy of
-        With _ y -> pure y
-        _ -> Left $ ExpectedWith aTy
-    App f x -> do
-      fTy <- inferC ctx f
-      case fTy of
-        Arrow a b -> do
-          xTy <- inferV ctx x
-          unless (a == xTy) . Left $ TypeMismatchV a xTy
-          pure b
-        _ -> Left $ ExpectedArrow fTy
+inst :: Exp a -> Exp 'V -> Exp a
+inst a b = subst (\x -> if x == 0 then b else Var (x-1)) a
 
 ix :: Int -> [a] -> Maybe a
 ix _ [] = Nothing
 ix 0 (x:_) = Just x
 ix n (_:xs) = ix (n-1) xs
 
-inferV :: [TyV] -> V -> Either TypeError TyV
-inferV ctx v =
-  case v of
+infer :: [Ty 'V] -> Exp a -> Either TypeError (Ty a)
+infer ctx c =
+  case c of
     Var n ->
       case ix n ctx of
         Nothing -> Left $ NotInScope n
         Just t -> pure t
-    Thunk a -> U <$> inferC ctx a
-    Inl a ty -> Sum <$> inferV ctx a <*> pure ty
-    Inr ty a -> Sum ty <$> inferV ctx a
-    MkProd a b -> Prod <$> inferV ctx a <*> inferV ctx b
+    Thunk a -> U <$> infer ctx a
+    Inl a ty -> Sum <$> infer ctx a <*> pure ty
+    Inr ty a -> Sum ty <$> infer ctx a
+    MkProd a b -> Prod <$> infer ctx a <*> infer ctx b
     MkOne -> pure One
+
+    Return a -> F <$> infer ctx a
+    MkWith a b -> With <$> infer ctx a <*> infer ctx b
+    Abs ty a -> Arrow ty <$> infer ctx a
+    Bind a b -> do
+      aTy <- infer ctx a
+      case aTy of
+        F i -> infer (i : ctx) b
+        _ -> Left $ ExpectedF aTy
+    Force a -> do
+      aTy <- infer ctx a
+      case aTy of
+        U i -> pure i
+        _ -> Left $ ExpectedU aTy
+    SumElim f g a -> do
+      aTy <- infer ctx a
+      case aTy of
+        Sum x y -> do
+          fTy <- infer (x : ctx) f
+          gTy <- infer (y : ctx) g
+          unless (fTy == gTy) . Left $ TypeMismatchC fTy gTy
+          pure fTy
+        _ -> Left $ ExpectedSum aTy
+    ProdElim f a -> do
+      aTy <- infer ctx a
+      case aTy of
+        Prod x y -> infer (x : y : ctx) f
+        _ -> Left $ ExpectedProd aTy
+    Fst a -> do
+      aTy <- infer ctx a
+      case aTy of
+        With x _ -> pure x
+        _ -> Left $ ExpectedWith aTy
+    Snd a -> do
+      aTy <- infer ctx a
+      case aTy of
+        With _ y -> pure y
+        _ -> Left $ ExpectedWith aTy
+    App f x -> do
+      fTy <- infer ctx f
+      case fTy of
+        Arrow a b -> do
+          xTy <- infer ctx x
+          unless (a == xTy) . Left $ TypeMismatchV a xTy
+          pure b
+        _ -> Left $ ExpectedArrow fTy
