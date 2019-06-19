@@ -47,6 +47,15 @@ infixl 5 `TApp`
 data Ty where
   -- | f : (a -> b)  /\\   x : a   ==>   f x : b
   TApp :: Ty -> Ty -> Ty
+  {-
+  inl3 : forall (a : Value). Sum Int a
+  inl3 = inl 3
+
+  inl' : forall (a : Value) (b : Value). a -> F (Sum a b)
+  inl' = \x -> return (inl x)
+  -}
+  -- | k1 kind  /\\  k1 |- b : k2  ==>  (  forall (a : k1). b  ) : k2
+  TForall :: Maybe Text -> Kind -> Ty -> Ty
 
   -- value types
 
@@ -81,12 +90,28 @@ unfoldTApp = go []
     go ts (TApp a b) = go (b : ts) a
     go ts b = (b, ts)
 
+renameTy :: (Int -> Int) -> Ty -> Ty
+renameTy f t =
+  case t of
+    U -> U
+    TInd a -> TInd a
+    TForall n k a -> TForall n k $ renameTy (rho f) a
+    F -> F
+    With -> With
+    Arrow -> Arrow
+    TApp a b -> TApp (renameTy f a) (renameTy f b)
+    TVar a -> TVar (f a)
+
+sigmaTy :: (Int -> Ty) -> (Int -> Ty)
+sigmaTy _ 0 = TVar 0
+sigmaTy f n = renameTy (+1) $ f (n-1)
 
 substTy :: (Int -> Ty) -> Ty -> Ty
 substTy f t =
   case t of
     U -> U
     TInd a -> TInd a
+    TForall n k a -> TForall n k $ substTy (sigmaTy f) a
     F -> F
     With -> With
     Arrow -> Arrow

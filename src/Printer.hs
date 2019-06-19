@@ -34,7 +34,7 @@ prettyExp names tm =
          _ -> id)
       (prettyExp names a) <>
       Pretty.text " : " <>
-      prettyTy b
+      prettyTy (const Nothing) b
     Var a ->
       fromMaybe (Pretty.char '#' <> Pretty.int a) $ names a
     Thunk a ->
@@ -102,7 +102,7 @@ prettyExp names tm =
       Pretty.text "\\(" <>
       foldMap (<> Pretty.space) m_ndoc <>
       Pretty.text ": " <>
-      prettyTy a <>
+      prettyTy (const Nothing) a <>
       Pretty.text ") -> " <>
       prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) b
     Bind name a b ->
@@ -177,13 +177,8 @@ prettyExp names tm =
          _ -> id)
       (prettyExp names a)
     App a b ->
-      Pretty.space <>
       (case a of
          Abs{} -> Pretty.parens
-         Return{} -> Pretty.parens
-         Fst{} -> Pretty.parens
-         Snd{} -> Pretty.parens
-         Force{} -> Pretty.parens
          Let{} -> Pretty.parens
          Bind{} -> Pretty.parens
          Case{} -> Pretty.parens
@@ -196,39 +191,65 @@ prettyExp names tm =
          _ -> id)
       (prettyExp names b)
 
-prettyTy :: Ty -> Doc
-prettyTy ty =
+prettyKind :: Kind -> Doc
+prettyKind k =
+  case k of
+    KArr a b ->
+      (case a of
+         KArr{} -> Pretty.parens
+         _ -> id)
+      (prettyKind a) <>
+      Pretty.text " -> " <>
+      prettyKind b
+    KComputation -> Pretty.text "Computation"
+    KValue -> Pretty.text "Value"
+
+prettyTy :: (Int -> Maybe Doc) -> Ty -> Doc
+prettyTy names ty =
   case ty of
+    TForall name k a ->
+      let m_ndoc = Pretty.text . Text.unpack <$> name in
+      Pretty.text "forall (" <>
+      foldMap (<> Pretty.space) m_ndoc <>
+      Pretty.text ": " <>
+      prettyKind k <>
+      Pretty.text "). " <>
+      prettyTy (\case; 0 -> m_ndoc; n -> names (n-1)) a
     TApp (TApp With a) b ->
       (case a of
          TApp (TApp Arrow _) _ -> Pretty.parens
+         TForall{} -> Pretty.parens
          _ -> id)
-      (prettyTy a) <>
+      (prettyTy names a) <>
       Pretty.text " & " <>
       (case b of
          TApp (TApp Arrow _) _ -> Pretty.parens
+         TForall{} -> Pretty.parens
          _ -> id)
-      (prettyTy b)
+      (prettyTy names b)
     TApp (TApp Arrow a) b ->
       (case a of
          TApp (TApp Arrow _) _ -> Pretty.parens
+         TForall{} -> Pretty.parens
          _ -> id)
-      (prettyTy a) <>
+      (prettyTy names a) <>
       Pretty.text " -> " <>
-      prettyTy b
+      prettyTy names b
     TApp a b ->
       (case a of
          TApp (TApp Arrow _) _ -> Pretty.parens
+         TForall{} -> Pretty.parens
          _ -> id)
-      (prettyTy a) <>
+      (prettyTy names a) <>
       Pretty.space <>
       (case b of
          TApp{} -> Pretty.parens
+         TForall{} -> Pretty.parens
          _ -> id)
-      (prettyTy b)
+      (prettyTy names b)
     U -> Pretty.char 'U'
     TInd a -> Pretty.text $ Text.unpack a
     F -> Pretty.char 'F'
     With -> Pretty.text "(&)"
     Arrow -> Pretty.text "(->)"
-    TVar a -> Pretty.char '#' <> Pretty.int a
+    TVar a -> fromMaybe (Pretty.char '#' <> Pretty.int a) (names a)

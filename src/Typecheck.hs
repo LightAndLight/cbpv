@@ -110,6 +110,7 @@ inferKind ::
   Ty -> m Kind
 inferKind ty =
   case ty of
+    TForall _ k a -> locally envKinds (k :) $ inferKind a
     U -> pure $ KArr KComputation KValue
     TInd n -> do
       decl <- lookupIndDecl n
