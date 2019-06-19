@@ -64,9 +64,9 @@ takeS n s = {
     Z -> return Nil; 
     S k -> 
       bind 
-        rest = takeS k (thunk (tail s)) 
+        rest = takeS k (thunk (tail (force s))) 
       in 
-        return (Cons (thunk (head s)) rest)
+        return (Cons (thunk (head (force s))) rest)
   }
 }
 
