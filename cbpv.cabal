@@ -16,7 +16,7 @@ category:            Language
 extra-source-files:  CHANGELOG.md
 
 library
-  exposed-modules:     Syntax, Semantics
+  exposed-modules:     Syntax, Semantics, Typecheck
   build-depends:       base ^>=4.12.0.0
                      , ansi-wl-pprint ^>=0.6
                      , containers ^>=0.6
