@@ -70,8 +70,7 @@ takeS n s = {
   }
 }
 
-codata AlephNull where
-  next : AlephNull
+codata AlephNull where { next : AlephNull }
   
 infinity : AlephNull
 infinity = cocase AlephNull of { next -> infinity  }
