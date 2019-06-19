@@ -55,7 +55,7 @@ codata Pair (a : Computation) (b : Computation) where {
 
 codata Stream (a : Computation) where {
   head : a;
-  tail : Pair a (Stream a)
+  tail : Stream a
 }
 
 takeS : forall (a : Computation). Nat -> U (Stream a) -> F (List (U a))
@@ -64,7 +64,7 @@ takeS n s = {
     Z -> return Nil; 
     S k -> 
       bind 
-        rest = takeS k (thunk (snd (tail s))) 
+        rest = takeS k (thunk (tail s)) 
       in 
         return (Cons (thunk (head s)) rest)
   }
