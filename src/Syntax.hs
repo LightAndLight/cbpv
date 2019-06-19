@@ -1,3 +1,4 @@
+{-# language BangPatterns #-}
 {-# language DataKinds, GADTs, KindSignatures #-}
 {-# language FlexibleContexts #-}
 {-# language OverloadedStrings #-}
@@ -75,7 +76,19 @@ data Ty where
 
   -- | TVar : a
   TVar :: Int -> Ty
+  TName :: Text -> Ty
   deriving (Eq, Show)
+
+abstractTy :: Text -> Ty -> Ty
+abstractTy n = go 0
+  where
+    go !depth ty =
+      case ty of
+        TApp a b -> TApp (go depth a) (go depth b)
+        TForall name k a -> TForall name k $ go (depth+1) a
+        TName n' | n == n' -> TVar depth
+        TVar ix -> if ix >= depth then TVar (ix + 1) else TVar ix
+        _ -> ty
 
 tvars :: Ty -> Set Int
 tvars = go
@@ -101,6 +114,7 @@ renameTy f t =
     Arrow -> Arrow
     TApp a b -> TApp (renameTy f a) (renameTy f b)
     TVar a -> TVar (f a)
+    TName a -> TName a
 
 sigmaTy :: (Int -> Ty) -> (Int -> Ty)
 sigmaTy _ 0 = TVar 0
@@ -117,6 +131,7 @@ substTy f t =
     Arrow -> Arrow
     TApp a b -> TApp (substTy f a) (substTy f b)
     TVar a -> f a
+    TName a -> TName a
 
 data Pattern
   = PWild
@@ -159,7 +174,36 @@ data Exp (a :: Sort) where
   Fst :: Exp 'C -> Exp 'C
   Snd :: Exp 'C -> Exp 'C
   App :: Exp 'C -> Exp 'V -> Exp 'C
+
+  Name :: Text -> Exp 'V
 deriving instance Show (Exp a)
+
+abstract :: Text -> Exp a -> Exp a
+abstract n = go 0
+  where
+    go :: Int -> Exp a -> Exp a
+    go !depth tm =
+      case tm of
+        App a b -> App (go depth a) (go depth b)
+        Abs name k a -> Abs name k $ go (depth+1) a
+        Bind name v a -> Bind name v $ go (depth+1) a
+        Let name v a -> Let name v $ go (depth+1) a
+        Name n'
+          | n == n' -> Var depth
+          | otherwise -> Name n'
+        Var ix -> if ix >= depth then Var (ix + 1) else Var ix
+        Ann a b -> Ann (go depth a) b
+        Thunk a -> Thunk $ go depth a
+        Force a -> Force $ go depth a
+        Return a -> Return $ go depth a
+        Fst a -> Fst $ go depth a
+        Snd a -> Snd $ go depth a
+        Ctor a b -> Ctor a $ go depth <$> b
+        MkWith a b -> MkWith (go depth a) (go depth b)
+        Case a bs ->
+          Case
+            (go depth a)
+            ((\(Branch p e) -> Branch p $ go (depth + patArity p) e) <$> bs)
 
 rho :: (Int -> Int) -> (Int -> Int)
 rho _ 0 = 0
@@ -170,6 +214,7 @@ rename f c =
   case c of
     Ann a b -> Ann (rename f a) b
 
+    Name a -> Name a
     Var a -> Var $ f a
     Thunk a -> Thunk $ rename f a
     Ctor a bs -> Ctor a (rename f <$> bs)
@@ -199,6 +244,7 @@ subst f c =
   case c of
     Ann a b -> Ann (subst f a) b
 
+    Name a -> Name a
     Var a -> f a
     Thunk a -> Thunk $ subst f a
     Ctor a bs -> Ctor a (subst f <$> bs)

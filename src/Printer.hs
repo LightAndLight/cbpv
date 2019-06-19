@@ -25,6 +25,7 @@ prettyPat p@(PCtor n _ _) =
 prettyExp :: (Int -> Maybe Doc) -> Exp a -> Doc
 prettyExp names tm =
   case tm of
+    Name a -> Pretty.text $ Text.unpack a
     Ann a b ->
       (case a of
          Abs{} -> Pretty.parens
@@ -135,7 +136,7 @@ prettyExp names tm =
     Case a bs ->
       Pretty.text "case " <>
       prettyExp names a <>
-      Pretty.text " of" Pretty.<$>
+      Pretty.text " of {" Pretty.<$>
       Pretty.indent 2
         (Pretty.vsep . NonEmpty.toList $
          (\(Branch p e) ->
@@ -147,7 +148,8 @@ prettyExp names tm =
                  if n < arity
                  then Just $ fmap (Pretty.text . Text.unpack) (patNames p) !! n
                  else names (n-arity))
-              e) <$> bs)
+              e) <$> bs) Pretty.<$>
+      Pretty.char '}'
     Fst a ->
       Pretty.text "fst " <>
       (case a of
@@ -207,6 +209,7 @@ prettyKind k =
 prettyTy :: (Int -> Maybe Doc) -> Ty -> Doc
 prettyTy names ty =
   case ty of
+    TName a -> Pretty.text $ Text.unpack a
     TForall name k a ->
       let m_ndoc = Pretty.text . Text.unpack <$> name in
       Pretty.text "forall (" <>

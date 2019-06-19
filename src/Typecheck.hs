@@ -25,6 +25,7 @@ import Syntax
 data ScopeError
   = InductiveNotInScope Text
   | CtorNotInScope Text
+  | UnboundName Text
   deriving Show
 
 data TypeError
@@ -110,6 +111,7 @@ inferKind ::
   Ty -> m Kind
 inferKind ty =
   case ty of
+    TName a -> throwError $ _UnboundName # a
     TForall _ k a -> locally envKinds (k :) $ inferKind a
     U -> pure $ KArr KComputation KValue
     TInd n -> do
@@ -184,6 +186,7 @@ infer ::
   Exp a -> m Ty
 infer c =
   case c of
+    Name n -> throwError $ _UnboundName # n
     Var n -> do
       ctx <- asks _envTypes
       case ix n ctx of

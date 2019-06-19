@@ -16,12 +16,15 @@ category:            Language
 extra-source-files:  CHANGELOG.md
 
 library
-  exposed-modules:     Syntax, Semantics, Typecheck, Printer
+  exposed-modules:     Syntax, Semantics, Typecheck, Printer, Lexer, Parser
   build-depends:       base ^>=4.12.0.0
+                     , attoparsec
                      , ansi-wl-pprint ^>=0.6
                      , containers ^>=0.6
                      , lens
+                     , megaparsec
                      , mtl ^>=2.2
+                     , reducers
                      , semigroupoids
                      , text ^>=1.2
   hs-source-dirs:      src
