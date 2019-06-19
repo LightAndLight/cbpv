@@ -69,4 +69,13 @@ takeS n s = {
         return (Cons (thunk (head s)) rest)
   }
 }
+
+codata AlephNull where
+  next : AlephNull
+  
+infinity : AlephNull
+infinity = cocase AlephNull of { next -> infinity  }
+
+countFrom : Nat -> Stream (F Nat)
+countFrom n = cocase Stream (F Nat) of { head -> return n; tail -> countFrom (S n) }
 ```
