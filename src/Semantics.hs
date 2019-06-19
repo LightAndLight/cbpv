@@ -19,8 +19,8 @@ findBranch n args (b :| bs) = go (b : bs)
     go (Branch p e : xs) =
       case p of
         PWild -> e
-        PVar -> inst e (Ctor n args)
-        PCtor n' arity ->
+        PVar _ -> inst e (Ctor n args)
+        PCtor n' arity _ ->
           if n == n'
           then
             if arity == length args
@@ -34,12 +34,12 @@ eval c =
     Ann a _ -> eval a
     Return a -> TReturn a
     MkWith a b -> TMkWith a b
-    Abs _ a -> TAbs a
-    Bind a b ->
+    Abs _ _ a -> TAbs a
+    Bind _ a b ->
       case eval a of
         TReturn x -> eval $ inst b x
         _ -> error "stuck: bind"
-    Let a b -> eval $ inst b a
+    Let _ a b -> eval $ inst b a
     Force (Thunk x) -> eval x
     Force{} -> error "stuck: force"
     Case (Ctor n as) bs -> eval $ findBranch n as bs

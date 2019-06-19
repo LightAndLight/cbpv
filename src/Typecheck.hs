@@ -110,13 +110,13 @@ inferKind ::
   Ty -> m Kind
 inferKind ty =
   case ty of
-    U -> pure $ KArr KCType KVType
+    U -> pure $ KArr KComputation KValue
     TInd n -> do
       decl <- lookupIndDecl n
       pure $ _indTypeKind decl
-    F -> pure $ KArr KVType KCType
-    With -> pure $ KArr KCType (KArr KCType KCType)
-    Arrow -> pure $ KArr KVType (KArr KCType KCType)
+    F -> pure $ KArr KValue KComputation
+    With -> pure $ KArr KComputation (KArr KComputation KComputation)
+    Arrow -> pure $ KArr KValue (KArr KComputation KComputation)
     TVar n -> do
       kctx <- asks _envKinds
       case ix n kctx of
@@ -167,8 +167,8 @@ checkPattern ::
   (AsScopeError e, AsKindError e, AsTypeError e, MonadError e m, MonadReader TCEnv m) =>
   Pattern -> Ty -> m [Ty]
 checkPattern PWild _ = pure []
-checkPattern PVar ty = pure [ty]
-checkPattern (PCtor n act) ty =
+checkPattern (PVar _) ty = pure [ty]
+checkPattern (PCtor n act _) ty =
   case unfoldTApp ty of
     (TInd nty, targs) -> do
       decl <- lookupIndDecl nty
@@ -191,15 +191,15 @@ infer c =
     Thunk a -> TApp U <$> infer a
     Return a -> TApp F <$> infer a
     MkWith a b -> (\x -> TApp (TApp With x)) <$> infer a <*> infer b
-    Abs ty a -> do
-      checkKind ty KVType
+    Abs _ ty a -> do
+      checkKind ty KValue
       TApp (TApp Arrow ty) <$> locally envTypes (ty :) (infer a)
-    Bind a b -> do
+    Bind _ a b -> do
       aTy <- infer a
       case aTy of
         TApp F i -> locally envTypes (i :) $ infer b
         _ -> throwError $ _ExpectedF # aTy
-    Let a b -> do
+    Let _ a b -> do
       aTy <- infer a
       locally envTypes (aTy :) $ infer b
     Force a -> do
@@ -242,10 +242,10 @@ checkIndDecl ::
   IndDecl ->
   m ()
 checkIndDecl decl = do
-  unless (k == KVType) . throwError $ _KindMismatch # (KVType, k)
+  unless (k == KValue) . throwError $ _KindMismatch # (KValue, k)
   for_ (_indCtors decl) $ \ctor ->
     locally envKinds (params <>) $
-    for_ (_indCtorArgs ctor) $ \argTy -> checkKind argTy KVType
+    for_ (_indCtorArgs ctor) $ \argTy -> checkKind argTy KValue
   where
     (params, k) = unfoldKArr (_indTypeKind decl)
 
@@ -274,7 +274,7 @@ sumDecl :: IndDecl
 sumDecl =
   IndDecl
   { _indTypeName = "Sum"
-  , _indTypeKind = KArr KVType $ KArr KVType KVType
+  , _indTypeKind = KArr KValue $ KArr KValue KValue
   , _indCtors =
     [ IndCtor
       { _indCtorName = "inl"
@@ -293,7 +293,7 @@ unitDecl :: IndDecl
 unitDecl =
   IndDecl
   { _indTypeName = "Unit"
-  , _indTypeKind = KVType
+  , _indTypeKind = KValue
   , _indCtors =
     [ IndCtor
       { _indCtorName = "unit"

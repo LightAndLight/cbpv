@@ -1,6 +1,8 @@
 {-# language GADTs #-}
+{-# language LambdaCase #-}
 module Printer where
 
+import Data.Maybe (fromMaybe)
 import Text.PrettyPrint.ANSI.Leijen (Doc)
 import qualified Text.PrettyPrint.ANSI.Leijen as Pretty
 
@@ -11,25 +13,30 @@ import Syntax
 
 prettyPat :: Pattern -> Doc
 prettyPat PWild = Pretty.char '_'
-prettyPat PVar = Pretty.text "v0"
-prettyPat (PCtor n arity) =
+prettyPat (PVar n) =
+  Pretty.text $ maybe "<unnamed>" Text.unpack n
+prettyPat p@(PCtor n _ _) =
   Pretty.text (Text.unpack n) <>
   Pretty.space <>
   Pretty.hsep vs
   where
-    vs = take arity $ Pretty.text . ('v' :) . show <$> [0::Int ..]
+    vs = Pretty.text . Text.unpack <$> patNames p
 
-prettyExp :: Exp a -> Doc
-prettyExp tm =
+prettyExp :: (Int -> Maybe Doc) -> Exp a -> Doc
+prettyExp names tm =
   case tm of
     Ann a b ->
       (case a of
          Abs{} -> Pretty.parens
+         Case{} -> Pretty.parens
+         Let{} -> Pretty.parens
+         Bind{} -> Pretty.parens
          _ -> id)
-      (prettyExp a) <>
+      (prettyExp names a) <>
       Pretty.text " : " <>
       prettyTy b
-    Var a -> Pretty.char '#' <> Pretty.int a
+    Var a ->
+      fromMaybe (Pretty.char '#' <> Pretty.int a) $ names a
     Thunk a ->
       Pretty.text "thunk " <>
       (case a of
@@ -43,7 +50,7 @@ prettyExp tm =
          Bind{} -> Pretty.parens
          Case{} -> Pretty.parens
          _ -> id)
-      (prettyExp a)
+      (prettyExp names a)
     Ctor a [] -> Pretty.text (Text.unpack a)
     Ctor a bs ->
       foldl
@@ -53,7 +60,7 @@ prettyExp tm =
               Thunk{} -> Pretty.parens
               Ctor _ (_:_) -> Pretty.parens
               _ -> id)
-           (prettyExp x))
+           (prettyExp names x))
         (Pretty.text $ Text.unpack a)
         bs
     Return a ->
@@ -62,7 +69,7 @@ prettyExp tm =
          Thunk{} -> Pretty.parens
          Ctor _ (_:_) -> Pretty.parens
          _ -> id)
-      (prettyExp a)
+      (prettyExp names a)
     MkWith a b ->
       Pretty.text "with " <>
       (case a of
@@ -76,7 +83,7 @@ prettyExp tm =
          Bind{} -> Pretty.parens
          Case{} -> Pretty.parens
          _ -> id)
-      (prettyExp a) <>
+      (prettyExp names a) <>
       Pretty.space <>
       (case b of
          App{} -> Pretty.parens
@@ -89,39 +96,58 @@ prettyExp tm =
          Bind{} -> Pretty.parens
          Case{} -> Pretty.parens
          _ -> id)
-      (prettyExp b)
-    Abs a b ->
-      Pretty.text "\\( :" <> prettyTy a <> Pretty.text ") -> " <>
-      prettyExp b
-    Bind a b ->
-      Pretty.text "bind= " <>
+      (prettyExp names b)
+    Abs name a b ->
+      let m_ndoc = Pretty.text . Text.unpack <$> name in
+      Pretty.text "\\(" <>
+      foldMap (<> Pretty.space) m_ndoc <>
+      Pretty.text ": " <>
+      prettyTy a <>
+      Pretty.text ") -> " <>
+      prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) b
+    Bind name a b ->
+      let m_ndoc = Pretty.text . Text.unpack <$> name in
+      Pretty.text "bind" <>
+      foldMap (\x -> Pretty.space <> x <> Pretty.space) m_ndoc <>
+      Pretty.text "= " <>
       (case a of
          Let{} -> Pretty.parens
          Bind{} -> Pretty.parens
          _ -> id)
-      (prettyExp a) <>
+      (prettyExp names a) <>
       Pretty.text " in" Pretty.<$>
-      prettyExp b
-    Let a b ->
-      Pretty.text "let= " <>
-      prettyExp a <>
+      prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) b
+    Let name a b ->
+      let m_ndoc = Pretty.text . Text.unpack <$> name in
+      Pretty.text "let" <>
+      foldMap (\x -> Pretty.space <> x <> Pretty.space) m_ndoc <>
+      Pretty.text "= " <>
+      prettyExp names a <>
       Pretty.text " in" Pretty.<$>
-      prettyExp b
+      prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) b
     Force a ->
       Pretty.text "force " <>
       (case a of
          Thunk{} -> Pretty.parens
          Ctor _ (_:_) -> Pretty.parens
          _ -> id)
-      (prettyExp a)
+      (prettyExp names a)
     Case a bs ->
       Pretty.text "case " <>
-      prettyExp a <>
-      Pretty.text "of" Pretty.<$>
+      prettyExp names a <>
+      Pretty.text " of" Pretty.<$>
       Pretty.indent 2
         (Pretty.vsep . NonEmpty.toList $
          (\(Branch p e) ->
-            prettyPat p <> Pretty.text " -> " <> prettyExp e) <$> bs)
+            let arity = patArity p in
+            prettyPat p <>
+            Pretty.text " -> " <>
+            prettyExp
+              (\n ->
+                 if n < arity
+                 then Just $ fmap (Pretty.text . Text.unpack) (patNames p) !! n
+                 else names (n-arity))
+              e) <$> bs)
     Fst a ->
       Pretty.text "fst " <>
       (case a of
@@ -135,7 +161,7 @@ prettyExp tm =
          Bind{} -> Pretty.parens
          Case{} -> Pretty.parens
          _ -> id)
-      (prettyExp a)
+      (prettyExp names a)
     Snd a ->
       Pretty.text "snd " <>
       (case a of
@@ -149,7 +175,7 @@ prettyExp tm =
          Bind{} -> Pretty.parens
          Case{} -> Pretty.parens
          _ -> id)
-      (prettyExp a)
+      (prettyExp names a)
     App a b ->
       Pretty.space <>
       (case a of
@@ -162,13 +188,13 @@ prettyExp tm =
          Bind{} -> Pretty.parens
          Case{} -> Pretty.parens
          _ -> id)
-      (prettyExp a) <>
+      (prettyExp names a) <>
       Pretty.space <>
       (case b of
          Thunk{} -> Pretty.parens
          Ctor _ (_:_) -> Pretty.parens
          _ -> id)
-      (prettyExp b)
+      (prettyExp names b)
 
 prettyTy :: Ty -> Doc
 prettyTy ty =

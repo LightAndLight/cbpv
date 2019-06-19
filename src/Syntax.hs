@@ -1,5 +1,6 @@
 {-# language DataKinds, GADTs, KindSignatures #-}
 {-# language FlexibleContexts #-}
+{-# language OverloadedStrings #-}
 {-# language RankNTypes #-}
 {-# language StandaloneDeriving #-}
 module Syntax where
@@ -34,8 +35,8 @@ instance e ~ IndDecl => HasIndDecls [e] where; indDecls = id
 
 data Kind
   = KArr Kind Kind
-  | KCType
-  | KVType
+  | KComputation
+  | KValue
   deriving (Eq, Ord, Show)
 
 unfoldKArr :: Kind -> ([Kind], Kind)
@@ -94,14 +95,20 @@ substTy f t =
 
 data Pattern
   = PWild
-  | PVar
-  | PCtor !Text !Int
+  | PVar (Maybe Text)
+  | PCtor !Text !Int [Text]
   deriving (Eq, Show)
 
 patArity :: Pattern -> Int
 patArity PWild = 0
-patArity PVar = 1
-patArity (PCtor _ n) = n
+patArity (PVar _) = 1
+patArity (PCtor _ n _) = n
+
+patNames :: Pattern -> [Text]
+patNames PWild = ["_"]
+patNames (PVar n) = maybe ["<unnamed>"] pure n
+patNames (PCtor _ arity ns) =
+  take arity $ ns <> repeat "<unnamed>"
 
 data Branch = Branch Pattern (Exp 'C)
   deriving Show
@@ -119,9 +126,9 @@ data Exp (a :: Sort) where
   Return :: Exp 'V -> Exp 'C
   MkWith :: Exp 'C -> Exp 'C -> Exp 'C
   --     VType
-  Abs :: Ty -> Exp 'C -> Exp 'C
-  Bind :: Exp 'C -> Exp 'C -> Exp 'C
-  Let :: Exp 'V -> Exp 'C -> Exp 'C
+  Abs :: Maybe Text -> Ty -> Exp 'C -> Exp 'C
+  Bind :: Maybe Text -> Exp 'C -> Exp 'C -> Exp 'C
+  Let :: Maybe Text -> Exp 'V -> Exp 'C -> Exp 'C
   Force :: Exp 'V -> Exp 'C
   Case :: Exp 'V -> NonEmpty Branch -> Exp 'C
   Fst :: Exp 'C -> Exp 'C
@@ -144,9 +151,9 @@ rename f c =
 
     Return a -> Return $ rename f a
     MkWith a b -> MkWith (rename f a) (rename f b)
-    Abs ty a -> Abs ty (rename (rho f) a)
-    Bind a b -> Bind (rename f a) (rename (rho f) b)
-    Let a b -> Let (rename f a) (rename (rho f) b)
+    Abs n ty a -> Abs n ty (rename (rho f) a)
+    Bind n a b -> Bind n (rename f a) (rename (rho f) b)
+    Let n a b -> Let n (rename f a) (rename (rho f) b)
     Force a -> Force $ rename f a
     Case a bs ->
       Case (rename f a) $
@@ -173,9 +180,9 @@ subst f c =
 
     Return a -> Return $ subst f a
     MkWith a b -> MkWith (subst f a) (subst f b)
-    Abs ty a -> Abs ty (subst (sigma f) a)
-    Bind a b -> Bind (subst f a) (subst (sigma f) b)
-    Let a b -> Let (subst f a) (subst (sigma f) b)
+    Abs n ty a -> Abs n ty $ subst (sigma f) a
+    Bind n a b -> Bind n (subst f a) (subst (sigma f) b)
+    Let n a b -> Let n (subst f a) (subst (sigma f) b)
     Force a -> Force $ subst f a
     Case a bs ->
       Case (subst f a) $
