@@ -15,10 +15,11 @@ eval c =
     Return a -> TReturn a
     MkWith a b -> TMkWith a b
     Abs _ a -> TAbs a
-    Bind a b -> do
+    Bind a b ->
       case eval a of
         TReturn x -> eval $ inst b x
         _ -> error "stuck: bind"
+    Let a b -> eval $ inst b a
     Force (Thunk x) -> eval x
     Force{} -> error "stuck: force"
     SumElim g _ (Inl a _) -> eval $ inst g a

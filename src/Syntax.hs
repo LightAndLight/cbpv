@@ -35,6 +35,7 @@ data Exp (a :: Sort) where
   MkWith :: Exp 'C -> Exp 'C -> Exp 'C
   Abs :: Ty 'V -> Exp 'C -> Exp 'C
   Bind :: Exp 'C -> Exp 'C -> Exp 'C
+  Let :: Exp 'V -> Exp 'C -> Exp 'C
   Force :: Exp 'V -> Exp 'C
   SumElim :: Exp 'C -> Exp 'C -> Exp 'V -> Exp 'C
   ProdElim :: Exp 'C -> Exp 'V -> Exp 'C
@@ -74,6 +75,7 @@ rename f c =
     MkWith a b -> MkWith (rename f a) (rename f b)
     Abs ty a -> Abs ty (rename (rho f) a)
     Bind a b -> Bind (rename f a) (rename (rho f) b)
+    Let a b -> Let (rename f a) (rename (rho f) b)
     Force a -> Force $ rename f a
     SumElim g h a -> SumElim (rename (rho f) g) (rename (rho f) h) (rename f a)
     ProdElim g a -> ProdElim (rename (rho f) g) (rename f a)
@@ -99,6 +101,7 @@ subst f c =
     MkWith a b -> MkWith (subst f a) (subst f b)
     Abs ty a -> Abs ty (subst (sigma f) a)
     Bind a b -> Bind (subst f a) (subst (sigma f) b)
+    Let a b -> Let (subst f a) (subst (sigma f) b)
     Force a -> Force $ subst f a
     SumElim g h a -> SumElim (subst (sigma f) g) (subst (sigma f) h) (subst f a)
     ProdElim g a -> ProdElim (subst (sigma f) g) (subst f a)
@@ -135,6 +138,9 @@ infer ctx c =
       case aTy of
         F i -> infer (i : ctx) b
         _ -> Left $ ExpectedF aTy
+    Let a b -> do
+      aTy <- infer ctx a
+      infer (aTy : ctx) b
     Force a -> do
       aTy <- infer ctx a
       case aTy of
