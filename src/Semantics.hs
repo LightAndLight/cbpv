@@ -1,17 +1,37 @@
 {-# language DataKinds, GADTs #-}
 module Semantics where
 
+import Data.List.NonEmpty (NonEmpty(..))
+import Data.Text (Text)
+
 import Syntax
 
 data Terminal
   = TReturn (Exp 'V)
   | TAbs (Exp 'C)
   | TMkWith (Exp 'C) (Exp 'C)
-  deriving (Eq, Show)
+  deriving Show
+
+findBranch :: Text -> [Exp 'V] -> NonEmpty Branch -> Exp 'C
+findBranch n args (b :| bs) = go (b : bs)
+  where
+    go [] = error "stuck: incomplete pattern match"
+    go (Branch p e : xs) =
+      case p of
+        PWild -> e
+        PVar -> inst e (Ctor n args)
+        PCtor n' arity ->
+          if n == n'
+          then
+            if arity == length args
+            then subst (args !!) e
+            else error "stuck: findBranch"
+          else go xs
 
 eval :: Exp 'C -> Terminal
 eval c =
   case c of
+    Ann a _ -> eval a
     Return a -> TReturn a
     MkWith a b -> TMkWith a b
     Abs _ a -> TAbs a
@@ -22,11 +42,8 @@ eval c =
     Let a b -> eval $ inst b a
     Force (Thunk x) -> eval x
     Force{} -> error "stuck: force"
-    SumElim g _ (Inl a _) -> eval $ inst g a
-    SumElim _ h (Inr _ a) -> eval $ inst h a
-    SumElim{} -> error "stuck: sumElim"
-    ProdElim g (MkProd a b) -> eval $ inst (inst g a) b
-    ProdElim{} -> error "stuck: prodElim"
+    Case (Ctor n as) bs -> eval $ findBranch n as bs
+    Case{} -> error "stuck: case"
     Fst a ->
       case eval a of
         TMkWith x _ -> eval x
