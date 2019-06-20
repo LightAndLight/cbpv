@@ -75,14 +75,14 @@ takeS = {
   thunk[
   \@(a : Comp) ->
   fix[
-    \(rec : U (forall (a : Comp). Nat -> U (Stream a) -> F (List (U a)))) ->
+    \(self : U (forall (a : Comp). Nat -> U (Stream a) -> F (List (U a)))) ->
     \(n : Nat) ->
     \(s : U (Stream a) n -> 
     case n of { 
       Z -> return[Nil[]]; 
       S[k] -> 
         bind 
-          rest = rec k thunk[ force[s].tail ]
+          rest = self k thunk[ force[s].tail ]
         in 
           return[ Cons[ thunk[ force[s].head ], rest ] ]
     }
@@ -93,17 +93,17 @@ takeS = {
 codata AlephNull where { next : AlephNull }
   
 infinity : U AlephNull
-infinity = thunk[ cocase AlephNull of { next -> force[infinity] } ]
+infinity = thunk[ fix[ \(self : U AlephNull) -> cocase AlephNull of { next -> force[self] } ] ]
 
 countFrom : U (Nat -> Stream (F Nat))
 countFrom = {
   thunk[
   fix[
-    \(rec : U (Nat -> Stream (F Nat))) ->
+    \(self : U (Nat -> Stream (F Nat))) ->
     \(n : Nat) -> 
     cocase Stream (F Nat) of { 
       head -> return[n]; 
-      tail -> force[rec] S[n]
+      tail -> force[self] S[n]
     }
   ]
   ]
