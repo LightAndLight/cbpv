@@ -254,6 +254,16 @@ infer c =
     Let _ a b -> do
       aTy <- infer a
       locally envTypes (aTy :) $ infer b
+    Fix a -> do
+      aTy <- infer a
+      case aTy of
+        TApp (TApp Arrow x) y ->
+          case x of
+            TApp U z -> do
+              unless (z == y) . throwError $ _TypeMismatch # (z, y)
+              pure z
+            _ -> throwError $ _ExpectedU # x
+        _ -> throwError $ _ExpectedArrow # aTy
     Force a -> do
       aTy <- infer a
       case aTy of

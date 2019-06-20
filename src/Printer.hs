@@ -78,6 +78,9 @@ prettyExp names tm =
       prettyExp names a <>
       Pretty.text " in" Pretty.<$>
       prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) b
+    Fix a ->
+      Pretty.text "fix" <>
+      Pretty.brackets (prettyExp names a)
     Force a ->
       Pretty.text "force" <>
       Pretty.brackets (prettyExp names a)

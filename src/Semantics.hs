@@ -48,6 +48,7 @@ eval c =
         TReturn x -> eval $ inst b x
         _ -> error "stuck: bind"
     Let _ a b -> eval $ inst b a
+    Fix a -> eval $ inst a (Thunk $ Fix a)
     Force (Thunk x) -> eval x
     Force{} -> error "stuck: force"
     Case (Ctor n as) bs -> eval $ findBranch n as bs

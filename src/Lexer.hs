@@ -20,6 +20,7 @@ data Token
   | TkBackslash Text Text
   | TkVal Text Text
   | TkComp Text Text
+  | TkFix Text
   | TkLet Text Text
   | TkBind Text Text
   | TkIn Text Text
@@ -56,6 +57,7 @@ append tk txt =
     TkVal a b -> Just $ TkVal a (b <> txt)
     TkComp a b -> Just $ TkComp a (b <> txt)
     TkSpace a -> Just $ TkSpace (a <> txt)
+    TkFix{} -> Nothing
     TkLet a b -> Just $ TkLet a (b <> txt)
     TkBind a b -> Just $ TkBind a (b <> txt)
     TkIn a b -> Just $ TkIn a (b <> txt)
@@ -110,6 +112,7 @@ token =
   TkComp <$> string "Comp" <*> spaces <|>
   TkNewline <$> takeWhile1 (== '\n') <*> spaces <|>
   TkSpace <$> takeWhile1 isSpace <|>
+  TkFix <$> string "fix" <|>
   TkLet <$> string "let" <*> spaces <|>
   TkBind <$> string "bind" <*> spaces <|>
   TkIn <$> string "in" <*> spaces <|>

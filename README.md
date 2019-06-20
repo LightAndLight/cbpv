@@ -28,17 +28,15 @@ A usable type system for call by push-value:
 ```
 data Sum (a : Val) (b : Val) = Left[a] | Right[b]
 
-sumElim : {
-  U (
-    forall (a : Val) (b : Val) (r : Comp).
-    U (a -> r) ->
-    U (b -> r) ->
-    Sum a b -> r
-  )
-}
 sumElim = {
   thunk[ 
-    \f g x -> case x of { 
+    \@(a : Val) ->
+    \@(b : Val) ->
+    \@(r : Comp) ->
+    \(f : U (a -> r)) ->
+    \(g : U (b -> r)) ->
+    \(x : Sum a b) ->
+    case x of { 
       Left[a] -> force[f] a; 
       Right[a] -> force[g] a 
     } 
@@ -47,14 +45,16 @@ sumElim = {
 
 data Tensor (a : Val) (b : Val) = Tensor[a, b]
 
-tensorElim : {
-  U (
-    forall (a : Val) (b : Val) (r : Comp).
-    U (a -> b -> r) ->
-    Tensor a b -> r
-  )
+tensorElim = {
+  thunk[ 
+    \@(a : Val) ->
+    \@(b : Val) ->
+    \@(r : Comp) ->
+    \(f : U (a -> b -> r)) ->
+    \(x : Tensor a b) -> 
+    case x of { Tensor[a, b] -> force[f] a b } 
+  ]
 }
-tensorElim = thunk[ \f x -> case x of { Tensor[a, b] -> force[f] a b } ]
 
 data Nat = Z[] | S[Nat]
 
@@ -70,24 +70,23 @@ codata Stream (a : Comp) where {
   tail : Stream a
 }
 
-takeS : {
-  U (
-    forall (a : Comp). 
-    Nat -> 
-    U (Stream a) -> 
-    F (List (U a))
-  )
-}
-takeS n s = {
+takeS : U (forall (a : Comp). Nat -> U (Stream a) -> F (List (U a)))
+takeS = {
   thunk[
+  \@(a : Comp) ->
+  fix[
+    \(rec : U (forall (a : Comp). Nat -> U (Stream a) -> F (List (U a)))) ->
+    \(n : Nat) ->
+    \(s : U (Stream a) n -> 
     case n of { 
       Z -> return[Nil[]]; 
       S[k] -> 
         bind 
-          rest = takeS k thunk[ force[s].tail ]
+          rest = rec k thunk[ force[s].tail ]
         in 
           return[ Cons[ thunk[ force[s].head ], rest ] ]
     }
+  ]
   ]
 }
 
@@ -99,10 +98,14 @@ infinity = thunk[ cocase AlephNull of { next -> force[infinity] } ]
 countFrom : U (Nat -> Stream (F Nat))
 countFrom = {
   thunk[
-    \n -> cocase Stream (F Nat) of { 
+  fix[
+    \(rec : U (Nat -> Stream (F Nat))) ->
+    \(n : Nat) -> 
+    cocase Stream (F Nat) of { 
       head -> return[n]; 
-      tail -> force[countFrom] S[n]
+      tail -> force[rec] S[n]
     }
+  ]
   ]
 }
 ```

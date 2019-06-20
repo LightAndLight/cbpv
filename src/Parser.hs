@@ -107,6 +107,9 @@ tkForce = satisfy (\case; TkForce{} -> True; _ -> False)
 tkLet :: MonadParsec e Tokens m => m Token
 tkLet = satisfy (\case; TkLet{} -> True; _ -> False)
 
+tkFix :: MonadParsec e Tokens m => m Token
+tkFix = satisfy (\case; TkFix{} -> True; _ -> False)
+
 tkEquals :: MonadParsec e Tokens m => m Token
 tkEquals = satisfy (\case; TkEquals{} -> True; _ -> False)
 
@@ -244,6 +247,7 @@ computation inBlock =
       foldl (\a b -> Dtor b a) <$> atom <*> many (tkDot *> tkIdent)
 
     atom =
+      Fix <$ tkFix <*> brackets (computation True) <|>
       Return <$ tkReturn <*> brackets (value True) <|>
       Force <$ tkForce <*> brackets (value True) <|>
       parens (computation True)
