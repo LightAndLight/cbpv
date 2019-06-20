@@ -3,15 +3,15 @@
 A usable type system for call by push-value:
 
 * Kinds
-  * The `*` kind is split in two: `Value` and `Computation`
-  * `U : Computation -> Value`
-  * `F : Value -> Computation`
-  * `(->) : Value -> Computation -> Computation`
+  * The `*` kind is split in two: `Val` (values) and `Comp` (computations)
+  * `U : Comp -> Val`
+  * `F : Val -> Comp`
+  * `(->) : Val -> Comp -> Comp`
   * etc.
-  * Top-level definitions must be `Value`s
+  * Top-level definitions must be `Val`s
 * User-definable datatypes
   * Currently require kind annotations (but this is simple to remove)
-  * Inductive datatypes inhabit the `Value` kind
+  * Inductive datatypes inhabit the `Val` kind
     * Only carries around other values
     * Constructors are not functions (functions only return computations),
       so constructors must be fully applied
@@ -26,11 +26,11 @@ A usable type system for call by push-value:
 (Doesn't parse, yet) (braces are how I ignore layout rules)
 
 ```
-data Sum (a : Value) (b : Value) = Left[a] | Right[b]
+data Sum (a : Val) (b : Val) = Left[a] | Right[b]
 
 sumElim : {
   U (
-    forall (a : Value) (b : Value) (r : Computation).
+    forall (a : Val) (b : Val) (r : Comp).
     U (a -> r) ->
     U (b -> r) ->
     Sum a b -> r
@@ -45,11 +45,11 @@ sumElim = {
   ]
 }
 
-data Tensor (a : Value) (b : Value) = Tensor[a, b]
+data Tensor (a : Val) (b : Val) = Tensor[a, b]
 
 tensorElim : {
   U (
-    forall (a : Value) (b : Value) (r : Computation).
+    forall (a : Val) (b : Val) (r : Comp).
     U (a -> b -> r) ->
     Tensor a b -> r
   )
@@ -58,21 +58,21 @@ tensorElim = thunk[ \f x -> case x of { Tensor[a, b] -> force[f] a b } ]
 
 data Nat = Z | S Nat
 
-data List (a : Value) = Nil | Cons a (List a)
+data List (a : Val) = Nil | Cons a (List a)
 
-codata Pair (a : Computation) (b : Computation) where {
+codata Pair (a : Comp) (b : Comp) where {
   fst : a;
   snd : b
 }
 
-codata Stream (a : Computation) where {
+codata Stream (a : Comp) where {
   head : a;
   tail : Stream a
 }
 
 takeS : {
   U (
-    forall (a : Computation). 
+    forall (a : Comp). 
     Nat -> 
     U (Stream a) -> 
     F (List (U a))

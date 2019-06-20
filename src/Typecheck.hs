@@ -156,7 +156,7 @@ inferKind ty =
   case ty of
     TName a -> throwError $ _UnboundName # a
     TForall _ k a -> locally envKinds (k :) $ inferKind a
-    U -> pure $ KArr KComputation KValue
+    U -> pure $ KArr KComp KVal
     TCtor n -> do
       mind <-
         catchError (Just <$> lookupIndDecl n) $ \_ -> pure Nothing
@@ -167,8 +167,8 @@ inferKind ty =
         (Just decl, Nothing) -> pure $ _indTypeKind decl
         (Nothing, Just decl) -> pure $ _coIndTypeKind decl
         (Just{}, Just{}) -> throwError $ _AmbiguousTyCtor # n
-    F -> pure $ KArr KValue KComputation
-    Arrow -> pure $ KArr KValue (KArr KComputation KComputation)
+    F -> pure $ KArr KVal KComp
+    Arrow -> pure $ KArr KVal (KArr KComp KComp)
     TVar n -> do
       kctx <- asks _envKinds
       case ix n kctx of
@@ -244,7 +244,7 @@ infer c =
     Thunk a -> TApp U <$> infer a
     Return a -> TApp F <$> infer a
     Abs _ ty a -> do
-      checkKind ty KValue
+      checkKind ty KVal
       TApp (TApp Arrow ty) <$> locally envTypes (ty :) (infer a)
     Bind _ a b -> do
       aTy <- infer a
@@ -270,7 +270,7 @@ infer c =
            pure x)
         ts
     CoCase t bs -> do
-      checkKind t KComputation
+      checkKind t KComp
       let (tc, targs) = unfoldTApp t
       case tc of
         TCtor n -> do
@@ -288,7 +288,7 @@ infer c =
         ety = TCtor (_coIndTypeName decl)
       unless (tc == ety) . throwError $ _TypeMismatch # (ety, tc)
       let retTy = substTy (targs !!) (_coIndDtorType dtor)
-      checkKind retTy KComputation
+      checkKind retTy KComp
       pure retTy
     App f x -> do
       fTy <- infer f
@@ -304,10 +304,10 @@ checkIndDecl ::
   ) =>
   IndDecl -> m ()
 checkIndDecl decl = do
-  unless (k == KValue) . throwError $ _KindMismatch # (KValue, k)
+  unless (k == KVal) . throwError $ _KindMismatch # (KVal, k)
   for_ (_indCtors decl) $ \ctor ->
     locally envKinds (params <>) $
-    for_ (_indCtorArgs ctor) $ \argTy -> checkKind argTy KValue
+    for_ (_indCtorArgs ctor) $ \argTy -> checkKind argTy KVal
   where
     (params, k) = unfoldKArr (_indTypeKind decl)
 
@@ -317,11 +317,11 @@ checkCoIndDecl ::
   ) =>
   CoIndDecl -> m ()
 checkCoIndDecl decl = do
-  unless (k == KComputation) . throwError $
-    _KindMismatch # (KComputation, k)
+  unless (k == KComp) . throwError $
+    _KindMismatch # (KComp, k)
   for_ (_coIndDtors decl) $ \dtor ->
     locally envKinds (params <>) $
-    checkKind (_coIndDtorType dtor) KComputation
+    checkKind (_coIndDtorType dtor) KComp
   where
     (params, k) = unfoldKArr (_coIndTypeKind decl)
 
@@ -350,7 +350,7 @@ sumDecl :: IndDecl
 sumDecl =
   IndDecl
   { _indTypeName = "Sum"
-  , _indTypeKind = KArr KValue $ KArr KValue KValue
+  , _indTypeKind = KArr KVal $ KArr KVal KVal
   , _indCtors =
     [ IndCtor
       { _indCtorName = "inl"
@@ -369,7 +369,7 @@ unitDecl :: IndDecl
 unitDecl =
   IndDecl
   { _indTypeName = "Unit"
-  , _indTypeKind = KValue
+  , _indTypeKind = KVal
   , _indCtors =
     [ IndCtor
       { _indCtorName = "unit"
@@ -383,7 +383,7 @@ streamDecl :: CoIndDecl
 streamDecl =
   CoIndDecl
   { _coIndTypeName = "Stream"
-  , _coIndTypeKind = KArr KComputation KComputation
+  , _coIndTypeKind = KArr KComp KComp
   , _coIndDtors =
     [ CoIndDtor
       { _coIndDtorName = "head"

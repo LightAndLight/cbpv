@@ -89,11 +89,11 @@ tkComma = satisfy (\case; TkComma{} -> True; _ -> False)
 tkArrow :: MonadParsec e Tokens m => m Token
 tkArrow = satisfy (\case; TkArrow{} -> True; _ -> False)
 
-tkValue :: MonadParsec e Tokens m => m Token
-tkValue = satisfy (\case; TkValue{} -> True; _ -> False)
+tkVal :: MonadParsec e Tokens m => m Token
+tkVal = satisfy (\case; TkVal{} -> True; _ -> False)
 
-tkComputation :: MonadParsec e Tokens m => m Token
-tkComputation = satisfy (\case; TkComputation{} -> True; _ -> False)
+tkComp :: MonadParsec e Tokens m => m Token
+tkComp = satisfy (\case; TkComp{} -> True; _ -> False)
 
 tkThunk :: MonadParsec e Tokens m => m Token
 tkThunk = satisfy (\case; TkThunk{} -> True; _ -> False)
@@ -148,8 +148,8 @@ kind :: MonadParsec e Tokens m => m Kind
 kind = foldr KArr <$> atom <*> many (tkArrow *> atom)
   where
     atom =
-      KValue <$ tkValue <|>
-      KComputation <$ tkComputation <|>
+      KVal <$ tkVal <|>
+      KComp <$ tkComp <|>
       parens kind
 
 ty :: MonadParsec e Tokens m => m Ty

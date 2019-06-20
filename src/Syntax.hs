@@ -52,8 +52,8 @@ instance e ~ CoIndDecl => HasCoIndDecls [e] where; coIndDecls = id
 
 data Kind
   = KArr Kind Kind
-  | KComputation
-  | KValue
+  | KComp
+  | KVal
   deriving (Eq, Ord, Show)
 
 unfoldKArr :: Kind -> ([Kind], Kind)

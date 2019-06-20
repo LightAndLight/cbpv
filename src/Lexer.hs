@@ -18,8 +18,8 @@ data Token
   | TkNewline Text Text
   | TkSpace Text
   | TkBackslash Text Text
-  | TkValue Text Text
-  | TkComputation Text Text
+  | TkVal Text Text
+  | TkComp Text Text
   | TkLet Text Text
   | TkBind Text Text
   | TkIn Text Text
@@ -53,8 +53,8 @@ append tk txt =
     TkUnderscore a b -> Just $ TkUnderscore a (b <> txt)
     TkBackslash a b -> Just $ TkBackslash a (b <> txt)
     TkForall a b -> Just $ TkForall a (b <> txt)
-    TkValue a b -> Just $ TkValue a (b <> txt)
-    TkComputation a b -> Just $ TkComputation a (b <> txt)
+    TkVal a b -> Just $ TkVal a (b <> txt)
+    TkComp a b -> Just $ TkComp a (b <> txt)
     TkSpace a -> Just $ TkSpace (a <> txt)
     TkLet a b -> Just $ TkLet a (b <> txt)
     TkBind a b -> Just $ TkBind a (b <> txt)
@@ -106,8 +106,8 @@ token =
   TkUnderscore <$> string "_" <*> spaces <|>
   TkBackslash <$> string "\\" <*> spaces <|>
   TkForall <$> string "forall" <*> spaces <|>
-  TkValue <$> string "Value" <*> spaces <|>
-  TkComputation <$> string "Computation" <*> spaces <|>
+  TkVal <$> string "Val" <*> spaces <|>
+  TkComp <$> string "Comp" <*> spaces <|>
   TkNewline <$> takeWhile1 (== '\n') <*> spaces <|>
   TkSpace <$> takeWhile1 isSpace <|>
   TkLet <$> string "let" <*> spaces <|>

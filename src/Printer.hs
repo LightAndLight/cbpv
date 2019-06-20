@@ -148,8 +148,8 @@ prettyKind k =
       (prettyKind a) <>
       Pretty.text " -> " <>
       prettyKind b
-    KComputation -> Pretty.text "Computation"
-    KValue -> Pretty.text "Value"
+    KComp -> Pretty.text "Comp"
+    KVal -> Pretty.text "Val"
 
 prettyTy :: (Int -> Maybe Doc) -> Ty -> Doc
 prettyTy names ty =
