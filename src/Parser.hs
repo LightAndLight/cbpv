@@ -207,15 +207,15 @@ computation inBlock =
       ty <* tkOf <*>
       braces ((:|) <$> cobranch <*> many (tkSemicolon *> cobranch))
 
-    fn =
-      atom <|>
+    app = foldl App <$> dtor <*> many (space inBlock *> value inBlock)
+
+    dtor =
+      foldl (\a b -> Dtor b a) <$> atom <*> many (tkDot *> tkIdent)
+
+    atom =
       Return <$ tkReturn <*> brackets (value True) <|>
-      Force <$ tkForce <*> brackets (value True)
-
-    app =
-      foldl App <$> fn <*> many (space inBlock *> value inBlock)
-
-    atom = parens (computation True)
+      Force <$ tkForce <*> brackets (value True) <|>
+      parens (computation True)
 
 value :: MonadParsec e Tokens m => Bool -> m (Exp 'V)
 value inBlock = atom <?> "value"

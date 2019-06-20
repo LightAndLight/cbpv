@@ -84,9 +84,9 @@ takeS n s = {
       Z -> return[Nil[]]; 
       S[k] -> 
         bind 
-          rest = takeS k thunk[ tail force[s] ]
+          rest = takeS k thunk[ force[s].tail ]
         in 
-          return[ Cons[ thunk[ head force[s] ], rest ] ]
+          return[ Cons[ thunk[ force[s].head ], rest ] ]
     }
   ]
 }

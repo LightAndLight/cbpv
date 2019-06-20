@@ -2,6 +2,8 @@
 {-# language LambdaCase #-}
 module Printer where
 
+import Data.Foldable (fold)
+import Data.List (intersperse)
 import Data.Maybe (fromMaybe)
 import Text.PrettyPrint.ANSI.Leijen (Doc)
 import qualified Text.PrettyPrint.ANSI.Leijen as Pretty
@@ -40,38 +42,16 @@ prettyExp names tm =
     Var a ->
       fromMaybe (Pretty.char '#' <> Pretty.int a) $ names a
     Thunk a ->
-      Pretty.text "thunk " <>
-      (case a of
-         App{} -> Pretty.parens
-         Abs{} -> Pretty.parens
-         Return{} -> Pretty.parens
-         Dtor{} -> Pretty.parens
-         Force{} -> Pretty.parens
-         Let{} -> Pretty.parens
-         Bind{} -> Pretty.parens
-         Case{} -> Pretty.parens
-         CoCase{} -> Pretty.parens
-         _ -> id)
-      (prettyExp names a)
+      Pretty.text "thunk" <>
+      Pretty.brackets (prettyExp names a)
     Ctor a [] -> Pretty.text (Text.unpack a)
     Ctor a bs ->
-      foldl
-        (\rest x ->
-           rest <>
-           (case x of
-              Thunk{} -> Pretty.parens
-              Ctor _ (_:_) -> Pretty.parens
-              _ -> id)
-           (prettyExp names x))
-        (Pretty.text $ Text.unpack a)
-        bs
+      Pretty.text (Text.unpack a) <>
+      Pretty.brackets
+        (fold . intersperse (Pretty.text ", ") $ prettyExp names <$> bs)
     Return a ->
-      Pretty.text "return " <>
-      (case a of
-         Thunk{} -> Pretty.parens
-         Ctor _ (_:_) -> Pretty.parens
-         _ -> id)
-      (prettyExp names a)
+      Pretty.text "return" <>
+      Pretty.brackets (prettyExp names a)
     Abs name a b ->
       let m_ndoc = Pretty.text . Text.unpack <$> name in
       Pretty.text "\\(" <>
@@ -101,12 +81,8 @@ prettyExp names tm =
       Pretty.text " in" Pretty.<$>
       prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) b
     Force a ->
-      Pretty.text "force " <>
-      (case a of
-         Thunk{} -> Pretty.parens
-         Ctor _ (_:_) -> Pretty.parens
-         _ -> id)
-      (prettyExp names a)
+      Pretty.text "force" <>
+      Pretty.brackets (prettyExp names a)
     Case a bs ->
       Pretty.text "case " <>
       prettyExp names a <>
