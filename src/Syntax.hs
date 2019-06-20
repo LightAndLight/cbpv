@@ -162,7 +162,7 @@ patNames (PVar n) = maybe ["<unnamed>"] pure n
 patNames (PCtor _ arity ns) =
   take arity $ ns <> repeat "<unnamed>"
 
-data Branch = Branch Pattern (Exp 'C)
+data Branch a = Branch Pattern (Exp a)
   deriving Show
 
 data CoBranch = CoBranch Text (Exp 'C)
@@ -182,9 +182,9 @@ data Exp (a :: Sort) where
   --     VType
   Abs :: Maybe Text -> Ty -> Exp 'C -> Exp 'C
   Bind :: Maybe Text -> Exp 'C -> Exp 'C -> Exp 'C
-  Let :: Maybe Text -> Exp 'V -> Exp 'C -> Exp 'C
+  Let :: Maybe Text -> Exp 'V -> Exp a -> Exp a
   Force :: Exp 'V -> Exp 'C
-  Case :: Exp 'V -> NonEmpty Branch -> Exp 'C
+  Case :: Exp 'V -> NonEmpty (Branch a) -> Exp a
   CoCase :: Ty -> NonEmpty CoBranch -> Exp 'C
   Dtor :: Text -> Exp 'C -> Exp 'C
   App :: Exp 'C -> Exp 'V -> Exp 'C

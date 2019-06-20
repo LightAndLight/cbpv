@@ -104,6 +104,15 @@ tkReturn = satisfy (\case; TkReturn{} -> True; _ -> False)
 tkForce :: MonadParsec e Tokens m => m Token
 tkForce = satisfy (\case; TkForce{} -> True; _ -> False)
 
+tkLet :: MonadParsec e Tokens m => m Token
+tkLet = satisfy (\case; TkLet{} -> True; _ -> False)
+
+tkEquals :: MonadParsec e Tokens m => m Token
+tkEquals = satisfy (\case; TkEquals{} -> True; _ -> False)
+
+tkIn :: MonadParsec e Tokens m => m Token
+tkIn = satisfy (\case; TkIn{} -> True; _ -> False)
+
 tkCase :: MonadParsec e Tokens m => m Token
 tkCase = satisfy (\case; TkCase{} -> True; _ -> False)
 
@@ -176,11 +185,11 @@ pattern_ =
     tkCtor <*>
     brackets (tkIdent `sepBy` tkComma)
 
-branch :: MonadParsec e Tokens m => m Branch
-branch =
+branch :: MonadParsec e Tokens m => (Bool -> m (Exp a)) -> m (Branch a)
+branch ex =
   (\(p, vs) e -> Branch p $ foldr abstract e vs) <$>
   pattern_ <* tkArrow <*>
-  computation True
+  ex True
 
 cobranch :: MonadParsec e Tokens m => m CoBranch
 cobranch =
@@ -188,19 +197,41 @@ cobranch =
   tkIdent <* tkArrow <*>
   computation True
 
+
+mkCase ::
+  MonadParsec e Tokens m =>
+  Bool -> (Bool -> m (Exp a)) -> m (Exp a)
+mkCase inBlock ex =
+  Case <$ tkCase <*>
+  value inBlock <* tkOf <*>
+  braces
+    ((:|) <$>
+      branch ex <*>
+      many (tkSemicolon *> branch ex))
+
+mkLet ::
+  MonadParsec e Tokens m =>
+  Bool ->
+  (Bool -> m (Exp a)) ->
+  m (Exp a)
+mkLet inBlock exbody =
+  (\a b -> Let (Just a) b . abstract a) <$ tkLet <*>
+  tkIdent <* tkEquals <*>
+  value inBlock <* tkIn <*>
+  exbody inBlock
+
 computation :: MonadParsec e Tokens m => Bool -> m (Exp 'C)
 computation inBlock =
-  (lam <|> app <|> case_ <|> cocase) <?> "computation"
+  (lam <|> app <|> case_ <|> cocase <|> let_) <?> "computation"
   where
     lam =
       (\(a, b) -> Abs (Just a) b . abstract a) <$ tkBackslash <*>
       parens ((,) <$> tkIdent <* tkColon <*> ty) <* tkArrow <*>
       computation inBlock
 
-    case_ =
-      Case <$ tkCase <*>
-      value inBlock <* tkOf <*>
-      braces ((:|) <$> branch <*> many (tkSemicolon *> branch))
+    let_ = mkLet inBlock computation
+
+    case_ = mkCase inBlock computation
 
     cocase =
       CoCase <$ tkCoCase <*>
@@ -218,8 +249,10 @@ computation inBlock =
       parens (computation True)
 
 value :: MonadParsec e Tokens m => Bool -> m (Exp 'V)
-value inBlock = atom <?> "value"
+value inBlock = (case_ <|> let_ <|> atom) <?> "value"
   where
+    let_ = mkLet inBlock value
+    case_ = mkCase inBlock value
     atom =
       Name <$> tkIdent <|>
       Thunk <$ tkThunk <*> brackets (computation True) <|>

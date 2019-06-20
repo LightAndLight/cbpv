@@ -12,7 +12,7 @@ data Terminal
   | TCoCase (NonEmpty CoBranch)
   deriving Show
 
-findBranch :: Text -> [Exp 'V] -> NonEmpty Branch -> Exp 'C
+findBranch :: Text -> [Exp 'V] -> NonEmpty (Branch a) -> Exp a
 findBranch n args (b :| bs) = go (b : bs)
   where
     go [] = error "stuck: incomplete pattern match"
