@@ -22,16 +22,18 @@ data Token
   | TkLet Text Text
   | TkBind Text Text
   | TkIn Text Text
-  | TkReturn Text Text
-  | TkThunk Text Text
-  | TkForce Text Text
+  | TkReturn Text
+  | TkThunk Text
+  | TkForce Text
   | TkIdent Text Text
   | TkCtor Text Text
   | TkDot Text Text
   | TkLBrace Text Text
   | TkRBrace Text Text
+  | TkLBracket Text Text
+  | TkRBracket Text Text
   | TkLParen Text Text
-  | TkRParen Text
+  | TkRParen Text Text
   | TkEquals Text Text
   | TkArrow Text Text
   | TkCase Text Text
@@ -42,37 +44,39 @@ data Token
   | TkEof Text
   deriving (Eq, Ord, Show)
 
-append :: Token -> Text -> Token
+append :: Token -> Text -> Maybe Token
 append tk txt =
   case tk of
-    TkNewline a b -> TkNewline a (b <> txt)
-    TkUnderscore a b -> TkUnderscore a (b <> txt)
-    TkBackslash a b -> TkBackslash a (b <> txt)
-    TkForall a b -> TkForall a (b <> txt)
-    TkValue a b -> TkValue a (b <> txt)
-    TkComputation a b -> TkComputation a (b <> txt)
-    TkSpace a -> TkSpace (a <> txt)
-    TkLet a b -> TkLet a (b <> txt)
-    TkBind a b -> TkBind a (b <> txt)
-    TkIn a b -> TkIn a (b <> txt)
-    TkReturn a b -> TkReturn a (b <> txt)
-    TkThunk a b -> TkThunk a (b <> txt)
-    TkForce a b -> TkForce a (b <> txt)
-    TkIdent a b -> TkIdent a (b <> txt)
-    TkCtor a b -> TkCtor a (b <> txt)
-    TkDot a b -> TkDot a (b <> txt)
-    TkLBrace a b -> TkLBrace a (b <> txt)
-    TkRBrace a b -> TkRBrace a (b <> txt)
-    TkLParen a b -> TkLParen a (b <> txt)
-    TkRParen a -> TkRParen (a <> txt)
-    TkEquals a b -> TkEquals a (b <> txt)
-    TkArrow a b -> TkArrow a (b <> txt)
-    TkCase a b -> TkCase a (b <> txt)
-    TkCoCase a b -> TkCoCase a (b <> txt)
-    TkOf a b -> TkOf a (b <> txt)
-    TkSemicolon a b -> TkSemicolon a (b <> txt)
-    TkColon a b -> TkColon a (b <> txt)
-    TkEof a -> TkEof (a <> txt)
+    TkNewline a b -> Just $ TkNewline a (b <> txt)
+    TkUnderscore a b -> Just $ TkUnderscore a (b <> txt)
+    TkBackslash a b -> Just $ TkBackslash a (b <> txt)
+    TkForall a b -> Just $ TkForall a (b <> txt)
+    TkValue a b -> Just $ TkValue a (b <> txt)
+    TkComputation a b -> Just $ TkComputation a (b <> txt)
+    TkSpace a -> Just $ TkSpace (a <> txt)
+    TkLet a b -> Just $ TkLet a (b <> txt)
+    TkBind a b -> Just $ TkBind a (b <> txt)
+    TkIn a b -> Just $ TkIn a (b <> txt)
+    TkReturn{} -> Nothing
+    TkThunk{} -> Nothing
+    TkForce{} -> Nothing
+    TkIdent a b -> Just $ TkIdent a (b <> txt)
+    TkCtor a b -> Just $ TkCtor a (b <> txt)
+    TkDot a b -> Just $ TkDot a (b <> txt)
+    TkLBrace a b -> Just $ TkLBrace a (b <> txt)
+    TkRBrace a b -> Just $ TkRBrace a (b <> txt)
+    TkLBracket a b -> Just $ TkLBracket a (b <> txt)
+    TkRBracket a b -> Just $ TkRBracket a (b <> txt)
+    TkLParen a b -> Just $ TkLParen a (b <> txt)
+    TkRParen a b -> Just $ TkRParen a (b <> txt)
+    TkEquals a b -> Just $ TkEquals a (b <> txt)
+    TkArrow a b -> Just $ TkArrow a (b <> txt)
+    TkCase a b -> Just $ TkCase a (b <> txt)
+    TkCoCase a b -> Just $ TkCoCase a (b <> txt)
+    TkOf a b -> Just $ TkOf a (b <> txt)
+    TkSemicolon a b -> Just $ TkSemicolon a (b <> txt)
+    TkColon a b -> Just $ TkColon a (b <> txt)
+    TkEof{} -> Nothing
 
 isSpace :: Char -> Bool
 isSpace = (||) <$> (== ' ') <*> (== '\t')
@@ -83,6 +87,8 @@ spaces = takeWhile isSpace
 reservedChar :: Char -> Bool
 reservedChar '{' = True
 reservedChar '}' = True
+reservedChar '[' = True
+reservedChar ']' = True
 reservedChar '(' = True
 reservedChar ')' = True
 reservedChar '=' = True
@@ -104,14 +110,16 @@ token =
   TkLet <$> string "let" <*> spaces <|>
   TkBind <$> string "bind" <*> spaces <|>
   TkIn <$> string "in" <*> spaces <|>
-  TkReturn <$> string "return" <*> spaces <|>
-  TkThunk <$> string "thunk" <*> spaces <|>
-  TkForce <$> string "force" <*> spaces <|>
+  TkReturn <$> string "return" <|>
+  TkForce <$> string "force" <|>
+  TkThunk <$> string "thunk" <|>
   TkDot <$> string "." <*> spaces <|>
   TkLBrace <$> string "{" <*> spaces <|>
   TkRBrace <$> string "}" <*> spaces <|>
+  TkLBracket <$> string "[" <*> spaces <|>
+  (\a -> TkRBracket a "") <$> string "]" <|>
   TkLParen <$> string "(" <*> spaces <|>
-  TkRParen <$> string ")" {- spaces deliberately omitted -} <|>
+  (\a -> TkRParen a "") <$> string ")" <|>
   TkSemicolon <$> string ";" <*> spaces <|>
   TkColon <$> string ":" <*> spaces <|>
   TkEquals <$> string "=" <*> spaces <|>
@@ -132,6 +140,9 @@ beginsTerm TkUnderscore{} = True
 beginsTerm TkLParen{} = True
 beginsTerm TkIdent{} = True
 beginsTerm TkCtor{} = True
+beginsTerm TkThunk{} = True
+beginsTerm TkForce{} = True
+beginsTerm TkReturn{} = True
 beginsTerm _ = False
 
 tokens :: Parser [Token]
@@ -146,7 +157,10 @@ tokens = spaces *> do
       tk <- token
       if beginsTerm tk
         then (tt :) <$> go t tk
-        else fmap (append tt cs :) $ token >>= go tk
+        else
+          case append tt cs of
+            Nothing -> (tt :) <$> go t tk
+            Just res -> fmap (res :) $ token >>= go tk
     go tt tk = fmap (tt :) $ token >>= go tk
 
 tokenize :: Text -> Either String [Token]

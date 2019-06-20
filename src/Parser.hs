@@ -58,6 +58,12 @@ tkLParen = satisfy (\case; TkLParen{} -> True; _ -> False)
 tkRParen :: MonadParsec e Tokens m => m Token
 tkRParen = satisfy (\case; TkRParen{} -> True; _ -> False)
 
+tkLBracket :: MonadParsec e Tokens m => m Token
+tkLBracket = satisfy (\case; TkLBracket{} -> True; _ -> False)
+
+tkRBracket :: MonadParsec e Tokens m => m Token
+tkRBracket = satisfy (\case; TkRBracket{} -> True; _ -> False)
+
 tkLBrace :: MonadParsec e Tokens m => m Token
 tkLBrace = satisfy (\case; TkLBrace{} -> True; _ -> False)
 
@@ -121,6 +127,9 @@ tkCtor =
 
 parens :: MonadParsec e Tokens m => m a -> m a
 parens = between tkLParen tkRParen
+
+brackets :: MonadParsec e Tokens m => m a -> m a
+brackets = between tkLBracket tkRBracket
 
 braces :: MonadParsec e Tokens m => m a -> m a
 braces = between tkLBrace tkRBrace
@@ -194,8 +203,8 @@ computation inBlock =
 
     fn =
       atom <|>
-      Return <$ tkReturn <*> value inBlock <|>
-      Force <$ tkForce <*> value inBlock
+      Return <$ tkReturn <*> brackets (value True) <|>
+      Force <$ tkForce <*> brackets (value True)
 
     app =
       foldl App <$> fn <*> many (space inBlock *> value inBlock)
@@ -208,11 +217,11 @@ value inBlock = (comp <|> atom) <?> "value"
     comp = Ctor <$> tkCtor <*> many (space inBlock *> atom)
     atom =
       Name <$> tkIdent <|>
-      Thunk <$ tkThunk <*> computation inBlock <|>
+      Thunk <$ tkThunk <*> brackets (computation True) <|>
       parens (value inBlock)
 
 parse ::
   String ->
   (forall m. MonadParsec Void Tokens m => m a) ->
   Tokens -> Either (Parsec.ParseErrorBundle Tokens Void) a
-parse s m ts = Parsec.parse m s ts
+parse s m = Parsec.parse m s

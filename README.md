@@ -37,7 +37,7 @@ sumElim : {
   )
 }
 sumElim f g x = {
-  thunk (case x of { Left a -> force f a; Right a -> force g a })
+  thunk[ case x of { Left a -> force[f] a; Right a -> force[g] a } ]
 }
 
 data Tensor (a : Value) (b : Value) = Tensor a b
@@ -49,7 +49,7 @@ tensorElim : {
     Tensor a b -> r
   )
 }
-tensorElim f x = thunk (case x of { Tensor a b -> force f a b })
+tensorElim f x = thunk[ case x of { Tensor a b -> force[f] a b } ]
 
 data Nat = Z | S Nat
 
@@ -74,28 +74,30 @@ takeS : {
   )
 }
 takeS n s = {
-  case n of { 
-    Z -> return Nil; 
-    S k -> 
-      bind 
-        rest = takeS k (thunk (tail (force s))) 
-      in 
-        return (Cons (thunk (head (force s))) rest)
-  }
+  thunk[
+    case n of { 
+      Z -> return[Nil]; 
+      S k -> 
+        bind 
+          rest = takeS k thunk[ tail force[s] ]
+        in 
+          return[ Cons thunk[ head force[s] ] rest ]
+    }
+  ]
 }
 
 codata AlephNull where { next : AlephNull }
   
 infinity : U AlephNull
-infinity = thunk (cocase AlephNull of { next -> infinity })
+infinity = thunk[ cocase AlephNull of { next -> infinity } ]
 
 countFrom : U (Nat -> Stream (F Nat))
 countFrom n = {
-  thunk (
+  thunk[
     cocase Stream (F Nat) of { 
-      head -> return n; 
-      tail -> force countFrom (S n) 
+      head -> return[n]; 
+      tail -> force[countFrom] (S n) 
     }
-  )
+  ]
 }
 ```
