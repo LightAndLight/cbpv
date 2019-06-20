@@ -18,15 +18,15 @@ A usable type system for call by push-value:
     * Generalised elimination using `case ... of`
   * Coinductive datatypes inhabit the `Computation` kind
     * Can only produce computations (unsure)
-    * Destructors are not functions (unsure) (functions only take values as arguments)
-    * Generalised introduction using `TBA`
+    * Destructors are not functions
+    * Generalised introduction using `cocase ... of`
 
 ## Examples
 
 (Doesn't parse, yet) (braces are how I ignore layout rules)
 
 ```
-data Sum (a : Value) (b : Value) = Left a | Right b
+data Sum (a : Value) (b : Value) = Left[a] | Right[b]
 
 sumElim : {
   U (
@@ -36,11 +36,16 @@ sumElim : {
     Sum a b -> r
   )
 }
-sumElim f g x = {
-  thunk[ case x of { Left a -> force[f] a; Right a -> force[g] a } ]
+sumElim = {
+  thunk[ 
+    \f g x -> case x of { 
+      Left[a] -> force[f] a; 
+      Right[a] -> force[g] a 
+    } 
+  ]
 }
 
-data Tensor (a : Value) (b : Value) = Tensor a b
+data Tensor (a : Value) (b : Value) = Tensor[a, b]
 
 tensorElim : {
   U (
@@ -49,7 +54,7 @@ tensorElim : {
     Tensor a b -> r
   )
 }
-tensorElim f x = thunk[ case x of { Tensor a b -> force[f] a b } ]
+tensorElim = thunk[ \f x -> case x of { Tensor[a, b] -> force[f] a b } ]
 
 data Nat = Z | S Nat
 
@@ -76,12 +81,12 @@ takeS : {
 takeS n s = {
   thunk[
     case n of { 
-      Z -> return[Nil]; 
-      S k -> 
+      Z -> return[Nil[]]; 
+      S[k] -> 
         bind 
           rest = takeS k thunk[ tail force[s] ]
         in 
-          return[ Cons thunk[ head force[s] ] rest ]
+          return[ Cons[ thunk[ head force[s] ], rest ] ]
     }
   ]
 }
@@ -92,11 +97,11 @@ infinity : U AlephNull
 infinity = thunk[ cocase AlephNull of { next -> force[infinity] } ]
 
 countFrom : U (Nat -> Stream (F Nat))
-countFrom n = {
+countFrom = {
   thunk[
-    cocase Stream (F Nat) of { 
+    \n -> cocase Stream (F Nat) of { 
       head -> return[n]; 
-      tail -> force[countFrom] (S n) 
+      tail -> force[countFrom] S[n]
     }
   ]
 }

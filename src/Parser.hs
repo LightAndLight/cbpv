@@ -11,7 +11,8 @@ import Control.Applicative ((<|>), many, optional)
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Text (Text)
 import Data.Void (Void)
-import Text.Megaparsec ((<?>), MonadParsec, Stream, satisfy, between)
+import Text.Megaparsec
+  ((<?>), MonadParsec, Stream, satisfy, between, sepBy)
 
 import qualified Text.Megaparsec as Parsec
 
@@ -81,6 +82,9 @@ tkSemicolon = satisfy (\case; TkSemicolon{} -> True; _ -> False)
 
 tkDot :: MonadParsec e Tokens m => m Token
 tkDot = satisfy (\case; TkDot{} -> True; _ -> False)
+
+tkComma :: MonadParsec e Tokens m => m Token
+tkComma = satisfy (\case; TkComma{} -> True; _ -> False)
 
 tkArrow :: MonadParsec e Tokens m => m Token
 tkArrow = satisfy (\case; TkArrow{} -> True; _ -> False)
@@ -168,7 +172,9 @@ pattern_ :: MonadParsec e Tokens m => m (Pattern, [Text])
 pattern_ =
   (PWild, []) <$ tkUnderscore <|>
   (\a -> (PVar $ Just a, [a])) <$> tkIdent <|>
-  (\a bs -> (PCtor a (length bs) bs, bs)) <$> tkCtor <*> many (space False *> tkIdent)
+  (\a bs -> (PCtor a (length bs) bs, bs)) <$>
+    tkCtor <*>
+    brackets (tkIdent `sepBy` tkComma)
 
 branch :: MonadParsec e Tokens m => m Branch
 branch =
@@ -212,12 +218,12 @@ computation inBlock =
     atom = parens (computation True)
 
 value :: MonadParsec e Tokens m => Bool -> m (Exp 'V)
-value inBlock = (comp <|> atom) <?> "value"
+value inBlock = atom <?> "value"
   where
-    comp = Ctor <$> tkCtor <*> many (space inBlock *> atom)
     atom =
       Name <$> tkIdent <|>
       Thunk <$ tkThunk <*> brackets (computation True) <|>
+      Ctor <$> tkCtor <*> brackets (sepBy (value True) tkComma) <|>
       parens (value inBlock)
 
 parse ::

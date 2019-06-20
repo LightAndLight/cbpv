@@ -13,6 +13,7 @@ import qualified Data.Text as Text
 
 data Token
   = TkForall Text Text
+  | TkComma Text Text
   | TkUnderscore Text Text
   | TkNewline Text Text
   | TkSpace Text
@@ -48,6 +49,7 @@ append :: Token -> Text -> Maybe Token
 append tk txt =
   case tk of
     TkNewline a b -> Just $ TkNewline a (b <> txt)
+    TkComma a b -> Just $ TkComma a (b <> txt)
     TkUnderscore a b -> Just $ TkUnderscore a (b <> txt)
     TkBackslash a b -> Just $ TkBackslash a (b <> txt)
     TkForall a b -> Just $ TkForall a (b <> txt)
@@ -93,6 +95,7 @@ reservedChar '(' = True
 reservedChar ')' = True
 reservedChar '=' = True
 reservedChar '.' = True
+reservedChar ',' = True
 reservedChar ' ' = True
 reservedChar ':' = True
 reservedChar ';' = True
@@ -114,6 +117,7 @@ token =
   TkForce <$> string "force" <|>
   TkThunk <$> string "thunk" <|>
   TkDot <$> string "." <*> spaces <|>
+  TkComma <$> string "," <*> spaces <|>
   TkLBrace <$> string "{" <*> spaces <|>
   TkRBrace <$> string "}" <*> spaces <|>
   TkLBracket <$> string "[" <*> spaces <|>
