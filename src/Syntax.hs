@@ -34,6 +34,22 @@ data IndCtor
 class HasIndDecls s where; indDecls :: Lens' s [IndDecl]
 instance e ~ IndDecl => HasIndDecls [e] where; indDecls = id
 
+data CoIndDecl
+  = CoIndDecl
+  { _coIndTypeName :: !Text
+  , _coIndTypeKind :: Kind
+  , _coIndDtors :: [CoIndDtor]
+  } deriving Show
+
+data CoIndDtor
+  = CoIndDtor
+  { _coIndDtorName :: !Text
+  , _coIndDtorType :: Ty
+  } deriving Show
+
+class HasCoIndDecls s where; coIndDecls :: Lens' s [CoIndDecl]
+instance e ~ CoIndDecl => HasCoIndDecls [e] where; coIndDecls = id
+
 data Kind
   = KArr Kind Kind
   | KComputation
@@ -62,21 +78,19 @@ data Ty where
 
   -- | U : CType -> VType
   U :: Ty
-  -- | Inductive : ... -> VType
-  TInd :: Text -> Ty
 
   -- computation types
 
   -- | F : VType -> CType
   F :: Ty
-  -- | With : CType -> CType -> CType
-  With :: Ty
   -- | Arrow : VType -> CType -> CType
   Arrow :: Ty
 
   -- | TVar : a
   TVar :: Int -> Ty
   TName :: Text -> Ty
+  -- | SomeCtor : a
+  TCtor :: Text -> Ty
   deriving (Eq, Show)
 
 abstractTy :: Text -> Ty -> Ty
@@ -107,10 +121,9 @@ renameTy :: (Int -> Int) -> Ty -> Ty
 renameTy f t =
   case t of
     U -> U
-    TInd a -> TInd a
+    TCtor a -> TCtor a
     TForall n k a -> TForall n k $ renameTy (rho f) a
     F -> F
-    With -> With
     Arrow -> Arrow
     TApp a b -> TApp (renameTy f a) (renameTy f b)
     TVar a -> TVar (f a)
@@ -124,10 +137,9 @@ substTy :: (Int -> Ty) -> Ty -> Ty
 substTy f t =
   case t of
     U -> U
-    TInd a -> TInd a
+    TCtor a -> TCtor a
     TForall n k a -> TForall n k $ substTy (sigmaTy f) a
     F -> F
-    With -> With
     Arrow -> Arrow
     TApp a b -> TApp (substTy f a) (substTy f b)
     TVar a -> f a
@@ -153,6 +165,9 @@ patNames (PCtor _ arity ns) =
 data Branch = Branch Pattern (Exp 'C)
   deriving Show
 
+data CoBranch = CoBranch Text (Exp 'C)
+  deriving Show
+
 data Exp (a :: Sort) where
   Ann :: Exp a -> Ty -> Exp a
 
@@ -164,15 +179,14 @@ data Exp (a :: Sort) where
 
   -- computations
   Return :: Exp 'V -> Exp 'C
-  MkWith :: Exp 'C -> Exp 'C -> Exp 'C
   --     VType
   Abs :: Maybe Text -> Ty -> Exp 'C -> Exp 'C
   Bind :: Maybe Text -> Exp 'C -> Exp 'C -> Exp 'C
   Let :: Maybe Text -> Exp 'V -> Exp 'C -> Exp 'C
   Force :: Exp 'V -> Exp 'C
   Case :: Exp 'V -> NonEmpty Branch -> Exp 'C
-  Fst :: Exp 'C -> Exp 'C
-  Snd :: Exp 'C -> Exp 'C
+  CoCase :: Ty -> NonEmpty CoBranch -> Exp 'C
+  Dtor :: Text -> Exp 'C -> Exp 'C
   App :: Exp 'C -> Exp 'V -> Exp 'C
 
   Name :: Text -> Exp 'V
@@ -196,14 +210,14 @@ abstract n = go 0
         Thunk a -> Thunk $ go depth a
         Force a -> Force $ go depth a
         Return a -> Return $ go depth a
-        Fst a -> Fst $ go depth a
-        Snd a -> Snd $ go depth a
         Ctor a b -> Ctor a $ go depth <$> b
-        MkWith a b -> MkWith (go depth a) (go depth b)
+        Dtor a b -> Dtor a $ go depth b
         Case a bs ->
           Case
             (go depth a)
             ((\(Branch p e) -> Branch p $ go (depth + patArity p) e) <$> bs)
+        CoCase a bs ->
+          CoCase a $ (\(CoBranch b c) -> CoBranch b $ go depth c) <$> bs
 
 rho :: (Int -> Int) -> (Int -> Int)
 rho _ 0 = 0
@@ -220,7 +234,6 @@ rename f c =
     Ctor a bs -> Ctor a (rename f <$> bs)
 
     Return a -> Return $ rename f a
-    MkWith a b -> MkWith (rename f a) (rename f b)
     Abs n ty a -> Abs n ty (rename (rho f) a)
     Bind n a b -> Bind n (rename f a) (rename (rho f) b)
     Let n a b -> Let n (rename f a) (rename (rho f) b)
@@ -231,8 +244,9 @@ rename f c =
         (\(Branch p e) ->
            Branch p $ rename (iterate rho f !! patArity p) e)
         bs
-    Fst a -> Fst $ rename f a
-    Snd a -> Snd $ rename f a
+    Dtor a b -> Dtor a $ rename f b
+    CoCase a bs ->
+      CoCase a $ (\(CoBranch b e) -> CoBranch b $ rename f e) <$> bs
     App a b -> App (rename f a) (rename f b)
 
 sigma :: (Int -> Exp 'V) -> (Int -> Exp 'V)
@@ -250,7 +264,6 @@ subst f c =
     Ctor a bs -> Ctor a (subst f <$> bs)
 
     Return a -> Return $ subst f a
-    MkWith a b -> MkWith (subst f a) (subst f b)
     Abs n ty a -> Abs n ty $ subst (sigma f) a
     Bind n a b -> Bind n (subst f a) (subst (sigma f) b)
     Let n a b -> Let n (subst f a) (subst (sigma f) b)
@@ -261,8 +274,9 @@ subst f c =
         (\(Branch p e) ->
            Branch p $ subst (iterate sigma f !! patArity p) e)
         bs
-    Fst a -> Fst $ subst f a
-    Snd a -> Snd $ subst f a
+    Dtor a b -> Dtor a $ subst f b
+    CoCase a bs ->
+      CoCase a $ (\(CoBranch b e) -> CoBranch b $ subst f e) <$> bs
     App a b -> App (subst f a) (subst f b)
 
 inst :: Exp a -> Exp 'V -> Exp a

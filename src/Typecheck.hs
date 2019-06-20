@@ -24,7 +24,11 @@ import Syntax
 
 data ScopeError
   = InductiveNotInScope Text
+  | CoinductiveNotInScope Text
+  | TyCtorNotInScope Text
+  | AmbiguousTyCtor Text
   | CtorNotInScope Text
+  | DtorNotInScope Text
   | UnboundName Text
   deriving Show
 
@@ -36,6 +40,7 @@ data TypeError
   | ExpectedWith Ty
   | ExpectedArrow Ty
   | ExpectedInductive Ty
+  | ExpectedCoinductive Ty
   | TypeMismatch Ty Ty
   | NotInScope Int
   | CtorExpectedArity Int Int
@@ -80,6 +85,42 @@ findIndCtor a = view indDecls >>= go
         ((,) t <$> lookupIndCtor a (_indCtors t))
         (\_ -> go ts)
 
+lookupCoIndDtor ::
+  (AsScopeError e, MonadError e m) =>
+  Text -> [CoIndDtor] -> m CoIndDtor
+lookupCoIndDtor a cs =
+  maybe (throwError $ _CtorNotInScope # a) pure $ go cs
+  where
+    go [] = Nothing
+    go (i : is) =
+      if _coIndDtorName i == a
+      then Just i
+      else go is
+
+lookupCoIndDecl ::
+  (HasCoIndDecls r, MonadReader r m, AsScopeError e, MonadError e m) =>
+  Text -> m CoIndDecl
+lookupCoIndDecl a =
+  go <$> view coIndDecls >>=
+  maybe (throwError $ _CoinductiveNotInScope # a) pure
+  where
+    go [] = Nothing
+    go (i : is) =
+      if _coIndTypeName i == a
+      then Just i
+      else go is
+
+findCoIndDtor ::
+  (HasCoIndDecls r, MonadReader r m, AsScopeError e, MonadError e m) =>
+  Text -> m (CoIndDecl, CoIndDtor)
+findCoIndDtor a = view coIndDecls >>= go
+  where
+    go [] = throwError $ _DtorNotInScope # a
+    go (t : ts) =
+      catchError
+        ((,) t <$> lookupCoIndDtor a (_coIndDtors t))
+        (\_ -> go ts)
+
 data KindError
   = ExpectedCType Kind
   | ExpectedVType Kind
@@ -101,10 +142,12 @@ data TCEnv
   { _envTypes :: [Ty]
   , _envKinds :: [Kind]
   , _envIndDecls :: [IndDecl]
+  , _envCoIndDecls :: [CoIndDecl]
   }
 makeLenses ''TCEnv
 
 instance HasIndDecls TCEnv where; indDecls = envIndDecls
+instance HasCoIndDecls TCEnv where; coIndDecls = envCoIndDecls
 
 inferKind ::
   (AsScopeError e, AsKindError e, MonadError e m, MonadReader TCEnv m) =>
@@ -114,11 +157,17 @@ inferKind ty =
     TName a -> throwError $ _UnboundName # a
     TForall _ k a -> locally envKinds (k :) $ inferKind a
     U -> pure $ KArr KComputation KValue
-    TInd n -> do
-      decl <- lookupIndDecl n
-      pure $ _indTypeKind decl
+    TCtor n -> do
+      mind <-
+        catchError (Just <$> lookupIndDecl n) $ \_ -> pure Nothing
+      mcoind <-
+        catchError (Just <$> lookupCoIndDecl n) $ \_ -> pure Nothing
+      case (mind, mcoind) of
+        (Nothing, Nothing) -> throwError $ _TyCtorNotInScope # n
+        (Just decl, Nothing) -> pure $ _indTypeKind decl
+        (Nothing, Just decl) -> pure $ _coIndTypeKind decl
+        (Just{}, Just{}) -> throwError $ _AmbiguousTyCtor # n
     F -> pure $ KArr KValue KComputation
-    With -> pure $ KArr KComputation (KArr KComputation KComputation)
     Arrow -> pure $ KArr KValue (KArr KComputation KComputation)
     TVar n -> do
       kctx <- asks _envKinds
@@ -144,7 +193,7 @@ checkCtor ::
   Ty -> m ()
 checkCtor name args ty =
   case unfoldTApp ty of
-    (TInd tname, targs) -> do
+    (TCtor tname, targs) -> do
       decl <- lookupIndDecl tname
       ctor <- lookupIndCtor name (_indCtors decl)
       let
@@ -173,7 +222,7 @@ checkPattern PWild _ = pure []
 checkPattern (PVar _) ty = pure [ty]
 checkPattern (PCtor n act _) ty =
   case unfoldTApp ty of
-    (TInd nty, targs) -> do
+    (TCtor nty, targs) -> do
       decl <- lookupIndDecl nty
       ctor <- lookupIndCtor n $ _indCtors decl
       let ex = _indCtorArity ctor
@@ -194,7 +243,6 @@ infer c =
         Just t -> pure t
     Thunk a -> TApp U <$> infer a
     Return a -> TApp F <$> infer a
-    MkWith a b -> (\x -> TApp (TApp With x)) <$> infer a <*> infer b
     Abs _ ty a -> do
       checkKind ty KValue
       TApp (TApp Arrow ty) <$> locally envTypes (ty :) (infer a)
@@ -221,16 +269,27 @@ infer c =
            unless (x == y) . throwError $ _TypeMismatch # (x, y)
            pure x)
         ts
-    Fst a -> do
+    CoCase t bs -> do
+      checkKind t KComputation
+      let (tc, targs) = unfoldTApp t
+      case tc of
+        TCtor n -> do
+          decl <- lookupCoIndDecl n
+          for_ bs $ \(CoBranch d e) -> do
+            dtor <- lookupCoIndDtor d $ _coIndDtors decl
+            check e $ substTy (targs !!) (_coIndDtorType dtor)
+          pure t
+        _ -> throwError $ _ExpectedCoinductive # tc
+    Dtor n a -> do
+      (decl, dtor) <- findCoIndDtor n
       aTy <- infer a
-      case aTy of
-        TApp (TApp With x) _ -> pure x
-        _ -> throwError $ _ExpectedWith # aTy
-    Snd a -> do
-      aTy <- infer a
-      case aTy of
-        TApp (TApp With _) y -> pure y
-        _ -> throwError $ _ExpectedWith # aTy
+      let
+        (tc, targs) = unfoldTApp aTy
+        ety = TCtor (_coIndTypeName decl)
+      unless (tc == ety) . throwError $ _TypeMismatch # (ety, tc)
+      let retTy = substTy (targs !!) (_coIndDtorType dtor)
+      checkKind retTy KComputation
+      pure retTy
     App f x -> do
       fTy <- infer f
       case fTy of
@@ -243,8 +302,7 @@ checkIndDecl ::
   ( AsScopeError e, AsKindError e, MonadError e m
   , MonadReader TCEnv m
   ) =>
-  IndDecl ->
-  m ()
+  IndDecl -> m ()
 checkIndDecl decl = do
   unless (k == KValue) . throwError $ _KindMismatch # (KValue, k)
   for_ (_indCtors decl) $ \ctor ->
@@ -252,6 +310,20 @@ checkIndDecl decl = do
     for_ (_indCtorArgs ctor) $ \argTy -> checkKind argTy KValue
   where
     (params, k) = unfoldKArr (_indTypeKind decl)
+
+checkCoIndDecl ::
+  ( AsScopeError e, AsKindError e, MonadError e m
+  , MonadReader TCEnv m
+  ) =>
+  CoIndDecl -> m ()
+checkCoIndDecl decl = do
+  unless (k == KComputation) . throwError $
+    _KindMismatch # (KComputation, k)
+  for_ (_coIndDtors decl) $ \dtor ->
+    locally envKinds (params <>) $
+    checkKind (_coIndDtorType dtor) KComputation
+  where
+    (params, k) = unfoldKArr (_coIndTypeKind decl)
 
 data TCError
   = TCScopeError ScopeError
@@ -303,6 +375,23 @@ unitDecl =
       { _indCtorName = "unit"
       , _indCtorArity = 0
       , _indCtorArgs = []
+      }
+    ]
+  }
+
+streamDecl :: CoIndDecl
+streamDecl =
+  CoIndDecl
+  { _coIndTypeName = "Stream"
+  , _coIndTypeKind = KArr KComputation KComputation
+  , _coIndDtors =
+    [ CoIndDtor
+      { _coIndDtorName = "head"
+      , _coIndDtorType = TVar 0
+      }
+    , CoIndDtor
+      { _coIndDtorName = "tail"
+      , _coIndDtorType = TApp (TCtor "Stream") (TVar 0)
       }
     ]
   }

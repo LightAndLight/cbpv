@@ -35,6 +35,7 @@ data Token
   | TkEquals Text Text
   | TkArrow Text Text
   | TkCase Text Text
+  | TkCoCase Text Text
   | TkOf Text Text
   | TkSemicolon Text Text
   | TkColon Text Text
@@ -67,6 +68,7 @@ append tk txt =
     TkEquals a b -> TkEquals a (b <> txt)
     TkArrow a b -> TkArrow a (b <> txt)
     TkCase a b -> TkCase a (b <> txt)
+    TkCoCase a b -> TkCoCase a (b <> txt)
     TkOf a b -> TkOf a (b <> txt)
     TkSemicolon a b -> TkSemicolon a (b <> txt)
     TkColon a b -> TkColon a (b <> txt)
@@ -86,6 +88,8 @@ reservedChar ')' = True
 reservedChar '=' = True
 reservedChar '.' = True
 reservedChar ' ' = True
+reservedChar ':' = True
+reservedChar ';' = True
 reservedChar _ = False
 
 token :: Parser Token
@@ -113,6 +117,7 @@ token =
   TkEquals <$> string "=" <*> spaces <|>
   TkArrow <$> string "->" <*> spaces <|>
   TkCase <$> string "case" <*> spaces <|>
+  TkCoCase <$> string "cocase" <*> spaces <|>
   TkOf <$> string "of" <*> spaces <|>
   (\a b -> TkIdent (Text.cons a b) "") <$>
     satisfy isLower <*>
@@ -126,6 +131,7 @@ beginsTerm :: Token -> Bool
 beginsTerm TkUnderscore{} = True
 beginsTerm TkLParen{} = True
 beginsTerm TkIdent{} = True
+beginsTerm TkCtor{} = True
 beginsTerm _ = False
 
 tokens :: Parser [Token]

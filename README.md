@@ -8,6 +8,7 @@ A usable type system for call by push-value:
   * `F : Value -> Computation`
   * `(->) : Value -> Computation -> Computation`
   * etc.
+  * Top-level definitions must be `Value`s
 * User-definable datatypes
   * Currently require kind annotations (but this is simple to remove)
   * Inductive datatypes inhabit the `Value` kind
@@ -28,21 +29,27 @@ A usable type system for call by push-value:
 data Sum (a : Value) (b : Value) = Left a | Right b
 
 sumElim : {
-  forall (a : Value) (b : Value) (r : Computation).
-  U (a -> r) ->
-  U (b -> r) ->
-  Sum a b -> r
+  U (
+    forall (a : Value) (b : Value) (r : Computation).
+    U (a -> r) ->
+    U (b -> r) ->
+    Sum a b -> r
+  )
 }
-sumElim f g x = case x of { Left a -> force f a; Right a -> force g a }
+sumElim f g x = {
+  thunk (case x of { Left a -> force f a; Right a -> force g a })
+}
 
 data Tensor (a : Value) (b : Value) = Tensor a b
 
 tensorElim : {
-  forall (a : Value) (b : Value) (r : Computation).
-  U (a -> b -> r) ->
-  Tensor a b -> r
+  U (
+    forall (a : Value) (b : Value) (r : Computation).
+    U (a -> b -> r) ->
+    Tensor a b -> r
+  )
 }
-tensorElim f x = case x of { Tensor a b -> force f a b }
+tensorElim f x = thunk (case x of { Tensor a b -> force f a b })
 
 data Nat = Z | S Nat
 
@@ -58,7 +65,14 @@ codata Stream (a : Computation) where {
   tail : Stream a
 }
 
-takeS : forall (a : Computation). Nat -> U (Stream a) -> F (List (U a))
+takeS : {
+  U (
+    forall (a : Computation). 
+    Nat -> 
+    U (Stream a) -> 
+    F (List (U a))
+  )
+}
 takeS n s = {
   case n of { 
     Z -> return Nil; 
@@ -72,9 +86,16 @@ takeS n s = {
 
 codata AlephNull where { next : AlephNull }
   
-infinity : AlephNull
-infinity = cocase AlephNull of { next -> infinity  }
+infinity : U AlephNull
+infinity = thunk (cocase AlephNull of { next -> infinity })
 
-countFrom : Nat -> Stream (F Nat)
-countFrom n = cocase Stream (F Nat) of { head -> return n; tail -> countFrom (S n) }
+countFrom : U (Nat -> Stream (F Nat))
+countFrom n = {
+  thunk (
+    cocase Stream (F Nat) of { 
+      head -> return n; 
+      tail -> force countFrom (S n) 
+    }
+  )
+}
 ```

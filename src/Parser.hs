@@ -97,6 +97,9 @@ tkForce = satisfy (\case; TkForce{} -> True; _ -> False)
 tkCase :: MonadParsec e Tokens m => m Token
 tkCase = satisfy (\case; TkCase{} -> True; _ -> False)
 
+tkCoCase :: MonadParsec e Tokens m => m Token
+tkCoCase = satisfy (\case; TkCoCase{} -> True; _ -> False)
+
 tkOf :: MonadParsec e Tokens m => m Token
 tkOf = satisfy (\case; TkOf{} -> True; _ -> False)
 
@@ -148,7 +151,7 @@ ty = (fa <|> arr) <?> "type"
     atom =
       U <$ ctor "U" <|>
       F <$ ctor "F" <|>
-      TInd <$> tkCtor <|>
+      TCtor <$> tkCtor <|>
       TName <$> tkIdent <|>
       parens (Arrow <$ tkArrow <|> ty)
 
@@ -164,8 +167,15 @@ branch =
   pattern_ <* tkArrow <*>
   computation True
 
+cobranch :: MonadParsec e Tokens m => m CoBranch
+cobranch =
+  CoBranch <$>
+  tkIdent <* tkArrow <*>
+  computation True
+
 computation :: MonadParsec e Tokens m => Bool -> m (Exp 'C)
-computation inBlock = (lam <|> app <|> case_) <?> "computation"
+computation inBlock =
+  (lam <|> app <|> case_ <|> cocase) <?> "computation"
   where
     lam =
       (\(a, b) -> Abs (Just a) b . abstract a) <$ tkBackslash <*>
@@ -176,6 +186,11 @@ computation inBlock = (lam <|> app <|> case_) <?> "computation"
       Case <$ tkCase <*>
       value inBlock <* tkOf <*>
       braces ((:|) <$> branch <*> many (tkSemicolon *> branch))
+
+    cocase =
+      CoCase <$ tkCoCase <*>
+      ty <* tkOf <*>
+      braces ((:|) <$> cobranch <*> many (tkSemicolon *> cobranch))
 
     fn =
       atom <|>
@@ -193,7 +208,8 @@ value inBlock = (comp <|> atom) <?> "value"
     comp = Ctor <$> tkCtor <*> many (space inBlock *> atom)
     atom =
       Name <$> tkIdent <|>
-      Thunk <$ tkThunk <*> computation inBlock
+      Thunk <$ tkThunk <*> computation inBlock <|>
+      parens (value inBlock)
 
 parse ::
   String ->

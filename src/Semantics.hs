@@ -9,7 +9,7 @@ import Syntax
 data Terminal
   = TReturn (Exp 'V)
   | TAbs (Exp 'C)
-  | TMkWith (Exp 'C) (Exp 'C)
+  | TCoCase (NonEmpty CoBranch)
   deriving Show
 
 findBranch :: Text -> [Exp 'V] -> NonEmpty Branch -> Exp 'C
@@ -28,12 +28,20 @@ findBranch n args (b :| bs) = go (b : bs)
             else error "stuck: findBranch"
           else go xs
 
+findCoBranch :: Text -> NonEmpty CoBranch -> Exp 'C
+findCoBranch n (b :| bs) = go (b:bs)
+  where
+    go [] = error "stuck: incomplete copattern match"
+    go (CoBranch n' e : cs) =
+      if n == n'
+      then e
+      else go cs
+
 eval :: Exp 'C -> Terminal
 eval c =
   case c of
     Ann a _ -> eval a
     Return a -> TReturn a
-    MkWith a b -> TMkWith a b
     Abs _ _ a -> TAbs a
     Bind _ a b ->
       case eval a of
@@ -44,14 +52,11 @@ eval c =
     Force{} -> error "stuck: force"
     Case (Ctor n as) bs -> eval $ findBranch n as bs
     Case{} -> error "stuck: case"
-    Fst a ->
+    CoCase _ bs -> TCoCase bs
+    Dtor n a ->
       case eval a of
-        TMkWith x _ -> eval x
-        _ -> error "stuck: fst"
-    Snd a ->
-      case eval a of
-        TMkWith _ x -> eval x
-        _ -> error "stuck: snd"
+        TCoCase bs -> eval $ findCoBranch n bs
+        _ -> error "stuck: dtor"
     App a b ->
       case eval a of
         TAbs x -> eval $ inst x b

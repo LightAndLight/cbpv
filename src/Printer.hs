@@ -30,6 +30,7 @@ prettyExp names tm =
       (case a of
          Abs{} -> Pretty.parens
          Case{} -> Pretty.parens
+         CoCase{} -> Pretty.parens
          Let{} -> Pretty.parens
          Bind{} -> Pretty.parens
          _ -> id)
@@ -44,12 +45,12 @@ prettyExp names tm =
          App{} -> Pretty.parens
          Abs{} -> Pretty.parens
          Return{} -> Pretty.parens
-         Fst{} -> Pretty.parens
-         Snd{} -> Pretty.parens
+         Dtor{} -> Pretty.parens
          Force{} -> Pretty.parens
          Let{} -> Pretty.parens
          Bind{} -> Pretty.parens
          Case{} -> Pretty.parens
+         CoCase{} -> Pretty.parens
          _ -> id)
       (prettyExp names a)
     Ctor a [] -> Pretty.text (Text.unpack a)
@@ -71,33 +72,6 @@ prettyExp names tm =
          Ctor _ (_:_) -> Pretty.parens
          _ -> id)
       (prettyExp names a)
-    MkWith a b ->
-      Pretty.text "with " <>
-      (case a of
-         App{} -> Pretty.parens
-         Abs{} -> Pretty.parens
-         Return{} -> Pretty.parens
-         Fst{} -> Pretty.parens
-         Snd{} -> Pretty.parens
-         Force{} -> Pretty.parens
-         Let{} -> Pretty.parens
-         Bind{} -> Pretty.parens
-         Case{} -> Pretty.parens
-         _ -> id)
-      (prettyExp names a) <>
-      Pretty.space <>
-      (case b of
-         App{} -> Pretty.parens
-         Abs{} -> Pretty.parens
-         Return{} -> Pretty.parens
-         Fst{} -> Pretty.parens
-         Snd{} -> Pretty.parens
-         Force{} -> Pretty.parens
-         Let{} -> Pretty.parens
-         Bind{} -> Pretty.parens
-         Case{} -> Pretty.parens
-         _ -> id)
-      (prettyExp names b)
     Abs name a b ->
       let m_ndoc = Pretty.text . Text.unpack <$> name in
       Pretty.text "\\(" <>
@@ -150,40 +124,39 @@ prettyExp names tm =
                  else names (n-arity))
               e) <$> bs) Pretty.<$>
       Pretty.char '}'
-    Fst a ->
-      Pretty.text "fst " <>
-      (case a of
+    Dtor a b ->
+      Pretty.text (Text.unpack a) <> Pretty.space <>
+      (case b of
          App{} -> Pretty.parens
          Abs{} -> Pretty.parens
          Return{} -> Pretty.parens
-         Fst{} -> Pretty.parens
-         Snd{} -> Pretty.parens
+         Dtor{} -> Pretty.parens
          Force{} -> Pretty.parens
          Let{} -> Pretty.parens
          Bind{} -> Pretty.parens
          Case{} -> Pretty.parens
+         CoCase{} -> Pretty.parens
          _ -> id)
-      (prettyExp names a)
-    Snd a ->
-      Pretty.text "snd " <>
-      (case a of
-         App{} -> Pretty.parens
-         Abs{} -> Pretty.parens
-         Return{} -> Pretty.parens
-         Fst{} -> Pretty.parens
-         Snd{} -> Pretty.parens
-         Force{} -> Pretty.parens
-         Let{} -> Pretty.parens
-         Bind{} -> Pretty.parens
-         Case{} -> Pretty.parens
-         _ -> id)
-      (prettyExp names a)
+      (prettyExp names b)
+    CoCase a bs ->
+      Pretty.text "cocase " <>
+      prettyTy (const Nothing) a <>
+      Pretty.text " of {" Pretty.<$>
+      Pretty.indent 2
+        (Pretty.vsep . NonEmpty.toList $
+         (\(CoBranch d e) ->
+            Pretty.text (Text.unpack d) <>
+            Pretty.text " -> " <>
+            prettyExp names e) <$>
+          bs) Pretty.<$>
+      Pretty.char '}'
     App a b ->
       (case a of
          Abs{} -> Pretty.parens
          Let{} -> Pretty.parens
          Bind{} -> Pretty.parens
          Case{} -> Pretty.parens
+         CoCase{} -> Pretty.parens
          _ -> id)
       (prettyExp names a) <>
       Pretty.space <>
@@ -218,18 +191,6 @@ prettyTy names ty =
       prettyKind k <>
       Pretty.text "). " <>
       prettyTy (\case; 0 -> m_ndoc; n -> names (n-1)) a
-    TApp (TApp With a) b ->
-      (case a of
-         TApp (TApp Arrow _) _ -> Pretty.parens
-         TForall{} -> Pretty.parens
-         _ -> id)
-      (prettyTy names a) <>
-      Pretty.text " & " <>
-      (case b of
-         TApp (TApp Arrow _) _ -> Pretty.parens
-         TForall{} -> Pretty.parens
-         _ -> id)
-      (prettyTy names b)
     TApp (TApp Arrow a) b ->
       (case a of
          TApp (TApp Arrow _) _ -> Pretty.parens
@@ -251,8 +212,7 @@ prettyTy names ty =
          _ -> id)
       (prettyTy names b)
     U -> Pretty.char 'U'
-    TInd a -> Pretty.text $ Text.unpack a
+    TCtor a -> Pretty.text $ Text.unpack a
     F -> Pretty.char 'F'
-    With -> Pretty.text "(&)"
     Arrow -> Pretty.text "(->)"
     TVar a -> fromMaybe (Pretty.char '#' <> Pretty.int a) (names a)
