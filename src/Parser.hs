@@ -84,7 +84,7 @@ tkDot :: MonadParsec e Tokens m => m Token
 tkDot = satisfy (\case; TkDot{} -> True; _ -> False)
 
 tkAt :: MonadParsec e Tokens m => m Token
-tkAt = satisfy (\case; TkDot{} -> True; _ -> False)
+tkAt = satisfy (\case; TkAt{} -> True; _ -> False)
 
 tkComma :: MonadParsec e Tokens m => m Token
 tkComma = satisfy (\case; TkComma{} -> True; _ -> False)
@@ -226,13 +226,24 @@ mkLet inBlock exbody =
   value inBlock <* tkIn <*>
   exbody inBlock
 
+mkAnn ::
+  MonadParsec e Tokens m =>
+  Bool ->
+  (Bool -> m (Exp a)) ->
+  m (Exp a)
+mkAnn inBlock ex =
+  (\a -> maybe a (Ann a)) <$> ex inBlock <*> optional (tkColon *> ty)
+
 computation :: MonadParsec e Tokens m => Bool -> m (Exp 'C)
 computation inBlock =
-  (lam <|> app <|> case_ <|> cocase <|> let_) <?> "computation"
+  (lam <|> ann <|> case_ <|> cocase <|> let_) <?> "computation"
   where
     lam =
-      (\(a, b) -> Abs (Just a) b . abstract a) <$ tkBackslash <*>
-      parens ((,) <$> tkIdent <* tkColon <*> ty) <* tkArrow <*>
+      (either
+         (\(a, b) -> Abs (Just a) b . abstract a)
+         (\(a, b) -> AbsTy (Just a) b . abstractTyExp a)) <$ tkBackslash <*>
+      (Left <$> parens ((,) <$> tkIdent <* tkColon <*> ty) <|>
+       Right <$ tkAt <*> parens ((,) <$> tkIdent <* tkColon <*> kind)) <* tkArrow <*>
       computation inBlock
 
     let_ = mkLet inBlock computation
@@ -244,12 +255,14 @@ computation inBlock =
       ty <* tkOf <*>
       braces ((:|) <$> cobranch <*> many (tkSemicolon *> cobranch))
 
-    app =
+    ann = mkAnn inBlock app
+
+    app ib =
       foldl (\b -> either (App b) (AppTy b)) <$>
       dtor <*>
       many
-        (space inBlock *>
-         (Left <$> value inBlock <|>
+        (space ib *>
+         (Left <$> value ib <|>
           Right <$ tkAt <*> ty))
 
     dtor =
@@ -262,15 +275,20 @@ computation inBlock =
       parens (computation True)
 
 value :: MonadParsec e Tokens m => Bool -> m (Exp 'V)
-value inBlock = (case_ <|> let_ <|> atom) <?> "value"
+value inBlock = (case_ <|> let_ <|> ann <|> absTy) <?> "value"
   where
+    ann = mkAnn inBlock atom
+    absTy =
+      (\(a, b) -> AbsTy (Just a) b . abstractTyExp a) <$ tkBackslash <* tkAt <*>
+      parens ((,) <$> tkIdent <* tkColon <*> kind) <* tkArrow <*>
+      value inBlock
     let_ = mkLet inBlock value
     case_ = mkCase inBlock value
-    atom =
+    atom ib =
       Name <$> tkIdent <|>
       Thunk <$ tkThunk <*> brackets (computation True) <|>
       Ctor <$> tkCtor <*> brackets (sepBy (value True) tkComma) <|>
-      parens (value inBlock)
+      parens (value ib)
 
 parse ::
   String ->

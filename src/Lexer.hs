@@ -159,8 +159,11 @@ beginsTerm _ = False
 tokens :: Parser [Token]
 tokens = spaces *> do
   t1 <- token
-  t2 <- token
-  go t1 t2
+  case t1 of
+    TkEof{} -> pure [t1]
+    _ -> do
+      t2 <- token
+      go t1 t2
   where
     go :: Token -> Token -> Parser [Token]
     go tt t@TkEof{} = pure [tt, t]

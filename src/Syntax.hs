@@ -203,8 +203,8 @@ abstract n = go 0
       case tm of
         App a b -> App (go depth a) (go depth b)
         Abs name k a -> Abs name k $ go (depth+1) a
-        Bind name v a -> Bind name v $ go (depth+1) a
-        Let name v a -> Let name v $ go (depth+1) a
+        Bind name v a -> Bind name (go depth v) $ go (depth+1) a
+        Let name v a -> Let name (go depth v) $ go (depth+1) a
         Fix a -> Fix $ go (depth+1) a
         Name n'
           | n == n' -> Var depth
@@ -224,6 +224,42 @@ abstract n = go 0
           CoCase a $ (\(CoBranch b c) -> CoBranch b $ go depth c) <$> bs
         AbsTy name k a -> AbsTy name k $ go depth a
         AppTy a t -> AppTy (go depth a) t
+
+abstractTyExp :: Text -> Exp a -> Exp a
+abstractTyExp n = go 0
+  where
+    goTy !depth ty =
+      case ty of
+        TApp a b -> TApp (goTy depth a) (goTy depth b)
+        TForall name k a -> TForall name k $ goTy (depth+1) a
+        TName n' | n == n' -> TVar depth
+        TVar ix -> if ix >= depth then TVar (ix + 1) else TVar ix
+        _ -> ty
+
+    go :: Int -> Exp a -> Exp a
+    go !depth tm =
+      case tm of
+        App a b -> App (go depth a) (go depth b)
+        Abs name t a -> Abs name (goTy depth t) (go depth a)
+        Bind name v a -> Bind name (go depth v) (go depth a)
+        Let name v a -> Let name (go depth v) (go depth a)
+        Fix a -> Fix $ go depth a
+        Name a -> Name a
+        Var ix -> Var ix
+        Ann a t -> Ann (go depth a) (goTy depth t)
+        Thunk a -> Thunk $ go depth a
+        Force a -> Force $ go depth a
+        Return a -> Return $ go depth a
+        Ctor a b -> Ctor a $ go depth <$> b
+        Dtor a b -> Dtor a $ go depth b
+        Case a bs ->
+          Case
+            (go depth a)
+            ((\(Branch p e) -> Branch p $ go (depth + patArity p) e) <$> bs)
+        CoCase a bs ->
+          CoCase (goTy depth a) $ (\(CoBranch b c) -> CoBranch b $ go depth c) <$> bs
+        AbsTy name k a -> AbsTy name k $ go (depth+1) a
+        AppTy a t -> AppTy (go depth a) (goTy depth t)
 
 rho :: (Int -> Int) -> (Int -> Int)
 rho _ 0 = 0
