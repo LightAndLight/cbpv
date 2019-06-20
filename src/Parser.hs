@@ -332,6 +332,9 @@ coIndDecl =
     dtorDecl :: MonadParsec e Tokens m => m CoIndDtor
     dtorDecl = CoIndDtor <$> tkIdent <* tkColon <*> ty
 
+decl :: MonadParsec e Tokens m => m Decl
+decl = Decl <$> tkIdent <* tkEquals <*> (braces (value True) <|> value False)
+
 parse ::
   String ->
   (forall m. MonadParsec Void Tokens m => m a) ->

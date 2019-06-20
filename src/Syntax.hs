@@ -19,6 +19,12 @@ import qualified Data.Set as Set
 
 data Sort = C | V
 
+data Decl
+  = Decl
+  { _declName :: !Text
+  , _declBody :: Exp 'V
+  } deriving Show
+
 data IndDecl
   = IndDecl
   { _indTypeName :: !Text

@@ -4,7 +4,7 @@ module Lexer where
 
 import Prelude hiding (takeWhile)
 
-import Control.Applicative ((<|>))
+import Control.Applicative ((<|>), optional)
 import Data.Attoparsec.Text
 import Data.Char (isAscii, isLower, isUpper)
 import Data.Text (Text)
@@ -114,25 +114,34 @@ reservedChar ';' = True
 reservedChar '|' = True
 reservedChar _ = False
 
+isIdentChar :: Char -> Bool
+isIdentChar = (&&) <$> isAscii <*> not . reservedChar
+
+notFollowedBy :: Show a => Parser a -> Parser ()
+notFollowedBy p = optional p >>= maybe (pure ()) (fail . show)
+
+keyword :: Text -> Parser Text
+keyword w = string w <* notFollowedBy (satisfy isIdentChar)
+
 token :: Parser Token
 token =
-  TkData <$> string "data" <*> spaces <|>
-  TkCodata <$> string "codata" <*> spaces <|>
+  TkData <$> keyword "data" <*> spaces <|>
+  TkCodata <$> keyword "codata" <*> spaces <|>
   TkUnderscore <$> string "_" <*> spaces <|>
   TkBackslash <$> string "\\" <*> spaces <|>
-  TkForall <$> string "forall" <*> spaces <|>
-  TkVal <$> string "Val" <*> spaces <|>
-  TkComp <$> string "Comp" <*> spaces <|>
+  TkForall <$> keyword "forall" <*> spaces <|>
+  TkVal <$> keyword "Val" <*> spaces <|>
+  TkComp <$> keyword "Comp" <*> spaces <|>
   TkNewline <$> takeWhile1 (== '\n') <*> spaces <|>
   TkSpace <$> takeWhile1 isSpace <|>
-  TkFix <$> string "fix" <|>
-  TkLet <$> string "let" <*> spaces <|>
-  TkWhere <$> string "where" <*> spaces <|>
-  TkBind <$> string "bind" <*> spaces <|>
-  TkIn <$> string "in" <*> spaces <|>
-  TkReturn <$> string "return" <|>
-  TkForce <$> string "force" <|>
-  TkThunk <$> string "thunk" <|>
+  TkFix <$> keyword "fix" <|>
+  TkLet <$> keyword "let" <*> spaces <|>
+  TkWhere <$> keyword "where" <*> spaces <|>
+  TkBind <$> keyword "bind" <*> spaces <|>
+  TkIn <$> keyword "in" <*> spaces <|>
+  TkReturn <$> keyword "return" <|>
+  TkForce <$> keyword "force" <|>
+  TkThunk <$> keyword "thunk" <|>
   TkPipe <$> string "|" <*> spaces <|>
   TkDot <$> string "." <*> spaces <|>
   TkAt <$> string "@" <*> spaces <|>
@@ -147,15 +156,15 @@ token =
   TkColon <$> string ":" <*> spaces <|>
   TkEquals <$> string "=" <*> spaces <|>
   TkArrow <$> string "->" <*> spaces <|>
-  TkCase <$> string "case" <*> spaces <|>
-  TkCoCase <$> string "cocase" <*> spaces <|>
-  TkOf <$> string "of" <*> spaces <|>
+  TkCase <$> keyword "case" <*> spaces <|>
+  TkCoCase <$> keyword "cocase" <*> spaces <|>
+  TkOf <$> keyword "of" <*> spaces <|>
   (\a b -> TkIdent (Text.cons a b) "") <$>
     satisfy isLower <*>
-    takeWhile ((&&) <$> isAscii <*> not . reservedChar) <|>
+    takeWhile isIdentChar <|>
   (\a b -> TkCtor (Text.cons a b) "") <$>
     satisfy isUpper <*>
-    takeWhile ((&&) <$> isAscii <*> not . reservedChar) <|>
+    takeWhile isIdentChar <|>
   TkEof "" <$ endOfInput
 
 beginsTerm :: Token -> Bool
