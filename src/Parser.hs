@@ -8,11 +8,12 @@
 module Parser where
 
 import Control.Applicative ((<|>), many, optional)
+import Control.Lens.Setter (over, mapped)
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Text (Text)
 import Data.Void (Void)
 import Text.Megaparsec
-  ((<?>), MonadParsec, Stream, satisfy, between, sepBy)
+  ((<?>), MonadParsec, Stream, satisfy, between, sepBy, sepBy1)
 
 import qualified Text.Megaparsec as Parsec
 
@@ -83,6 +84,9 @@ tkSemicolon = satisfy (\case; TkSemicolon{} -> True; _ -> False)
 tkDot :: MonadParsec e Tokens m => m Token
 tkDot = satisfy (\case; TkDot{} -> True; _ -> False)
 
+tkPipe :: MonadParsec e Tokens m => m Token
+tkPipe = satisfy (\case; TkPipe{} -> True; _ -> False)
+
 tkAt :: MonadParsec e Tokens m => m Token
 tkAt = satisfy (\case; TkAt{} -> True; _ -> False)
 
@@ -109,6 +113,15 @@ tkForce = satisfy (\case; TkForce{} -> True; _ -> False)
 
 tkLet :: MonadParsec e Tokens m => m Token
 tkLet = satisfy (\case; TkLet{} -> True; _ -> False)
+
+tkWhere :: MonadParsec e Tokens m => m Token
+tkWhere = satisfy (\case; TkWhere{} -> True; _ -> False)
+
+tkData :: MonadParsec e Tokens m => m Token
+tkData = satisfy (\case; TkData{} -> True; _ -> False)
+
+tkCodata :: MonadParsec e Tokens m => m Token
+tkCodata = satisfy (\case; TkCodata{} -> True; _ -> False)
 
 tkFix :: MonadParsec e Tokens m => m Token
 tkFix = satisfy (\case; TkFix{} -> True; _ -> False)
@@ -289,6 +302,35 @@ value inBlock = (case_ <|> let_ <|> ann <|> absTy) <?> "value"
       Thunk <$ tkThunk <*> brackets (computation True) <|>
       Ctor <$> tkCtor <*> brackets (sepBy (value True) tkComma) <|>
       parens (value ib)
+
+indDecl :: MonadParsec e Tokens m => m IndDecl
+indDecl =
+  (\n ps mctors ->
+     let (pns, ks) = unzip ps in
+     IndDecl n pns (foldr KArr KVal ks) $
+     maybe [] (over (mapped.indCtorArgs.mapped) (abstractTys pns)) mctors) <$ tkData <*>
+  tkCtor <* optional tkSpace <*>
+  sepBy (parens $ (,) <$> tkIdent <* tkColon <*> kind) tkSpace <*>
+  optional (tkEquals *> sepBy1 ctorDecl tkPipe)
+  where
+    ctorDecl :: MonadParsec e Tokens m => m IndCtor
+    ctorDecl =
+      (\n ps -> IndCtor n (length ps) ps) <$>
+      tkCtor <*>
+      brackets (sepBy ty tkComma)
+
+coIndDecl :: MonadParsec e Tokens m => m CoIndDecl
+coIndDecl =
+  (\n ps mdtors ->
+     let (pns, ks) = unzip ps in
+     CoIndDecl n pns (foldr KArr KComp ks) $
+     maybe [] (over (mapped.coIndDtorType) (abstractTys pns)) mdtors) <$ tkCodata <*>
+  tkCtor <* optional tkSpace <*>
+  sepBy (parens $ (,) <$> tkIdent <* tkColon <*> kind) tkSpace <*>
+  optional (tkWhere *> braces (sepBy1 dtorDecl tkSemicolon))
+  where
+    dtorDecl :: MonadParsec e Tokens m => m CoIndDtor
+    dtorDecl = CoIndDtor <$> tkIdent <* tkColon <*> ty
 
 parse ::
   String ->

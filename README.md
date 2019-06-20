@@ -16,7 +16,7 @@ A usable type system for call by push-value:
     * Constructors are not functions (functions only return computations),
       so constructors must be fully applied
     * Generalised elimination using `case ... of`
-  * Coinductive datatypes inhabit the `Computation` kind
+  * Coinductive datatypes inhabit the `Comp` kind
     * Can only produce computations (unsure)
     * Destructors are not functions
     * Generalised introduction using `cocase ... of`

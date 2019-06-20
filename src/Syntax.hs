@@ -4,9 +4,11 @@
 {-# language OverloadedStrings #-}
 {-# language RankNTypes #-}
 {-# language StandaloneDeriving #-}
+{-# language TemplateHaskell #-}
 module Syntax where
 
 import Control.Lens.Lens (Lens')
+import Control.Lens.TH (makeLenses)
 import Data.Bifunctor (first)
 import Data.List (iterate)
 import Data.List.NonEmpty (NonEmpty(..))
@@ -20,6 +22,7 @@ data Sort = C | V
 data IndDecl
   = IndDecl
   { _indTypeName :: !Text
+  , _indTypeParams :: [Text]
   , _indTypeKind :: Kind
   , _indCtors :: [IndCtor]
   } deriving Show
@@ -37,6 +40,7 @@ instance e ~ IndDecl => HasIndDecls [e] where; indDecls = id
 data CoIndDecl
   = CoIndDecl
   { _coIndTypeName :: !Text
+  , _coIndTypeParams :: [Text]
   , _coIndTypeKind :: Kind
   , _coIndDtors :: [CoIndDtor]
   } deriving Show
@@ -103,6 +107,9 @@ abstractTy n = go 0
         TName n' | n == n' -> TVar depth
         TVar ix -> if ix >= depth then TVar (ix + 1) else TVar ix
         _ -> ty
+
+abstractTys :: [Text] -> Ty -> Ty
+abstractTys ns t = foldr abstractTy t ns
 
 tvars :: Ty -> Set Int
 tvars = go
@@ -390,3 +397,6 @@ inst a b = subst (\x -> if x == 0 then b else Var (x-1)) a
 
 instTyExp :: Exp a -> Ty -> Exp a
 instTyExp a b = substTyExp (\x -> if x == 0 then b else TVar (x-1)) a
+
+makeLenses ''IndCtor
+makeLenses ''CoIndDtor

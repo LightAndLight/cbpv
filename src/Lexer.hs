@@ -13,6 +13,8 @@ import qualified Data.Text as Text
 
 data Token
   = TkForall Text Text
+  | TkData Text Text
+  | TkCodata Text Text
   | TkComma Text Text
   | TkUnderscore Text Text
   | TkNewline Text Text
@@ -22,6 +24,7 @@ data Token
   | TkComp Text Text
   | TkFix Text
   | TkLet Text Text
+  | TkWhere Text Text
   | TkBind Text Text
   | TkIn Text Text
   | TkReturn Text
@@ -29,6 +32,7 @@ data Token
   | TkForce Text
   | TkIdent Text Text
   | TkCtor Text Text
+  | TkPipe Text Text
   | TkDot Text Text
   | TkAt Text Text
   | TkLBrace Text Text
@@ -50,6 +54,8 @@ data Token
 append :: Token -> Text -> Maybe Token
 append tk txt =
   case tk of
+    TkData a b -> Just $ TkData a (b <> txt)
+    TkCodata a b -> Just $ TkCodata a (b <> txt)
     TkNewline a b -> Just $ TkNewline a (b <> txt)
     TkComma a b -> Just $ TkComma a (b <> txt)
     TkUnderscore a b -> Just $ TkUnderscore a (b <> txt)
@@ -60,6 +66,7 @@ append tk txt =
     TkSpace a -> Just $ TkSpace (a <> txt)
     TkFix{} -> Nothing
     TkLet a b -> Just $ TkLet a (b <> txt)
+    TkWhere a b -> Just $ TkWhere a (b <> txt)
     TkBind a b -> Just $ TkBind a (b <> txt)
     TkIn a b -> Just $ TkIn a (b <> txt)
     TkReturn{} -> Nothing
@@ -67,6 +74,7 @@ append tk txt =
     TkForce{} -> Nothing
     TkIdent a b -> Just $ TkIdent a (b <> txt)
     TkCtor a b -> Just $ TkCtor a (b <> txt)
+    TkPipe a b -> Just $ TkPipe a (b <> txt)
     TkDot a b -> Just $ TkDot a (b <> txt)
     TkAt a b -> Just $ TkAt a (b <> txt)
     TkLBrace a b -> Just $ TkLBrace a (b <> txt)
@@ -103,10 +111,13 @@ reservedChar ',' = True
 reservedChar ' ' = True
 reservedChar ':' = True
 reservedChar ';' = True
+reservedChar '|' = True
 reservedChar _ = False
 
 token :: Parser Token
 token =
+  TkData <$> string "data" <*> spaces <|>
+  TkCodata <$> string "codata" <*> spaces <|>
   TkUnderscore <$> string "_" <*> spaces <|>
   TkBackslash <$> string "\\" <*> spaces <|>
   TkForall <$> string "forall" <*> spaces <|>
@@ -116,11 +127,13 @@ token =
   TkSpace <$> takeWhile1 isSpace <|>
   TkFix <$> string "fix" <|>
   TkLet <$> string "let" <*> spaces <|>
+  TkWhere <$> string "where" <*> spaces <|>
   TkBind <$> string "bind" <*> spaces <|>
   TkIn <$> string "in" <*> spaces <|>
   TkReturn <$> string "return" <|>
   TkForce <$> string "force" <|>
   TkThunk <$> string "thunk" <|>
+  TkPipe <$> string "|" <*> spaces <|>
   TkDot <$> string "." <*> spaces <|>
   TkAt <$> string "@" <*> spaces <|>
   TkComma <$> string "," <*> spaces <|>

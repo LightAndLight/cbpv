@@ -369,15 +369,16 @@ sumDecl :: IndDecl
 sumDecl =
   IndDecl
   { _indTypeName = "Sum"
+  , _indTypeParams = ["a", "b"]
   , _indTypeKind = KArr KVal $ KArr KVal KVal
   , _indCtors =
     [ IndCtor
-      { _indCtorName = "inl"
+      { _indCtorName = "Left"
       , _indCtorArity = 1
       , _indCtorArgs = [TVar 0]
       }
     , IndCtor
-      { _indCtorName = "inr"
+      { _indCtorName = "Right"
       , _indCtorArity = 1
       , _indCtorArgs = [TVar 1]
       }
@@ -388,10 +389,11 @@ unitDecl :: IndDecl
 unitDecl =
   IndDecl
   { _indTypeName = "Unit"
+  , _indTypeParams = []
   , _indTypeKind = KVal
   , _indCtors =
     [ IndCtor
-      { _indCtorName = "unit"
+      { _indCtorName = "Unit"
       , _indCtorArity = 0
       , _indCtorArgs = []
       }
@@ -402,6 +404,7 @@ streamDecl :: CoIndDecl
 streamDecl =
   CoIndDecl
   { _coIndTypeName = "Stream"
+  , _coIndTypeParams = ["a"]
   , _coIndTypeKind = KArr KComp KComp
   , _coIndDtors =
     [ CoIndDtor
