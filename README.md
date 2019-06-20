@@ -89,7 +89,7 @@ takeS n s = {
 codata AlephNull where { next : AlephNull }
   
 infinity : U AlephNull
-infinity = thunk[ cocase AlephNull of { next -> infinity } ]
+infinity = thunk[ cocase AlephNull of { next -> force[infinity] } ]
 
 countFrom : U (Nat -> Stream (F Nat))
 countFrom n = {
