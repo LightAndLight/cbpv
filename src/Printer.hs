@@ -19,10 +19,9 @@ prettyPat (PVar n) =
   Pretty.text $ maybe "<unnamed>" Text.unpack n
 prettyPat p@(PCtor n _ _) =
   Pretty.text (Text.unpack n) <>
-  Pretty.space <>
-  Pretty.hsep vs
-  where
-    vs = Pretty.text . Text.unpack <$> patNames p
+  Pretty.brackets
+    (fold . intersperse (Pretty.text ", ") $
+     Pretty.text . Text.unpack <$> patNames p)
 
 prettyExp :: (Int -> Maybe Doc) -> Exp a -> Doc
 prettyExp names tm =
@@ -44,7 +43,6 @@ prettyExp names tm =
     Thunk a ->
       Pretty.text "thunk" <>
       Pretty.brackets (prettyExp names a)
-    Ctor a [] -> Pretty.text (Text.unpack a)
     Ctor a bs ->
       Pretty.text (Text.unpack a) <>
       Pretty.brackets
@@ -101,19 +99,17 @@ prettyExp names tm =
               e) <$> bs) Pretty.<$>
       Pretty.char '}'
     Dtor a b ->
-      Pretty.text (Text.unpack a) <> Pretty.space <>
       (case b of
          App{} -> Pretty.parens
          Abs{} -> Pretty.parens
-         Return{} -> Pretty.parens
-         Dtor{} -> Pretty.parens
-         Force{} -> Pretty.parens
          Let{} -> Pretty.parens
          Bind{} -> Pretty.parens
          Case{} -> Pretty.parens
          CoCase{} -> Pretty.parens
          _ -> id)
-      (prettyExp names b)
+      (prettyExp names b) <>
+      Pretty.dot <>
+      Pretty.text (Text.unpack a)
     CoCase a bs ->
       Pretty.text "cocase " <>
       prettyTy (const Nothing) a <>
