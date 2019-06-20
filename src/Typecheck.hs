@@ -41,6 +41,7 @@ data TypeError
   | ExpectedArrow Ty
   | ExpectedInductive Ty
   | ExpectedCoinductive Ty
+  | ExpectedForall Ty
   | TypeMismatch Ty Ty
   | NotInScope Int
   | CtorExpectedArity Int Int
@@ -235,6 +236,14 @@ infer ::
   Exp a -> m Ty
 infer c =
   case c of
+    AppTy a t -> do
+      aTy <- infer a
+      case aTy of
+        TForall _ k rest -> rest <$ checkKind t k
+        _ -> throwError $ _ExpectedForall # aTy
+    AbsTy n k a -> do
+      aTy <- locally envKinds (k :) $ infer a
+      pure $ TForall n k aTy
     Name n -> throwError $ _UnboundName # n
     Var n -> do
       ctx <- asks _envTypes

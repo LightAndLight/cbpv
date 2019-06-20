@@ -83,6 +83,9 @@ tkSemicolon = satisfy (\case; TkSemicolon{} -> True; _ -> False)
 tkDot :: MonadParsec e Tokens m => m Token
 tkDot = satisfy (\case; TkDot{} -> True; _ -> False)
 
+tkAt :: MonadParsec e Tokens m => m Token
+tkAt = satisfy (\case; TkDot{} -> True; _ -> False)
+
 tkComma :: MonadParsec e Tokens m => m Token
 tkComma = satisfy (\case; TkComma{} -> True; _ -> False)
 
@@ -241,7 +244,13 @@ computation inBlock =
       ty <* tkOf <*>
       braces ((:|) <$> cobranch <*> many (tkSemicolon *> cobranch))
 
-    app = foldl App <$> dtor <*> many (space inBlock *> value inBlock)
+    app =
+      foldl (\b -> either (App b) (AppTy b)) <$>
+      dtor <*>
+      many
+        (space inBlock *>
+         (Left <$> value inBlock <|>
+          Right <$ tkAt <*> ty))
 
     dtor =
       foldl (\a b -> Dtor b a) <$> atom <*> many (tkDot *> tkIdent)

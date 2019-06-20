@@ -30,6 +30,7 @@ data Token
   | TkIdent Text Text
   | TkCtor Text Text
   | TkDot Text Text
+  | TkAt Text Text
   | TkLBrace Text Text
   | TkRBrace Text Text
   | TkLBracket Text Text
@@ -67,6 +68,7 @@ append tk txt =
     TkIdent a b -> Just $ TkIdent a (b <> txt)
     TkCtor a b -> Just $ TkCtor a (b <> txt)
     TkDot a b -> Just $ TkDot a (b <> txt)
+    TkAt a b -> Just $ TkAt a (b <> txt)
     TkLBrace a b -> Just $ TkLBrace a (b <> txt)
     TkRBrace a b -> Just $ TkRBrace a (b <> txt)
     TkLBracket a b -> Just $ TkLBracket a (b <> txt)
@@ -120,6 +122,7 @@ token =
   TkForce <$> string "force" <|>
   TkThunk <$> string "thunk" <|>
   TkDot <$> string "." <*> spaces <|>
+  TkAt <$> string "@" <*> spaces <|>
   TkComma <$> string "," <*> spaces <|>
   TkLBrace <$> string "{" <*> spaces <|>
   TkRBrace <$> string "}" <*> spaces <|>
@@ -150,6 +153,7 @@ beginsTerm TkCtor{} = True
 beginsTerm TkThunk{} = True
 beginsTerm TkForce{} = True
 beginsTerm TkReturn{} = True
+beginsTerm TkAt{} = True
 beginsTerm _ = False
 
 tokens :: Parser [Token]

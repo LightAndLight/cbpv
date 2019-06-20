@@ -191,6 +191,8 @@ data Exp (a :: Sort) where
   App :: Exp 'C -> Exp 'V -> Exp 'C
 
   Name :: Text -> Exp 'V
+  AbsTy :: Maybe Text -> Kind -> Exp a -> Exp a
+  AppTy :: Exp a -> Ty -> Exp a
 deriving instance Show (Exp a)
 
 abstract :: Text -> Exp a -> Exp a
@@ -220,6 +222,8 @@ abstract n = go 0
             ((\(Branch p e) -> Branch p $ go (depth + patArity p) e) <$> bs)
         CoCase a bs ->
           CoCase a $ (\(CoBranch b c) -> CoBranch b $ go depth c) <$> bs
+        AbsTy name k a -> AbsTy name k $ go depth a
+        AppTy a t -> AppTy (go depth a) t
 
 rho :: (Int -> Int) -> (Int -> Int)
 rho _ 0 = 0
@@ -252,6 +256,37 @@ rename f c =
       CoCase a $ (\(CoBranch b e) -> CoBranch b $ rename f e) <$> bs
     App a b -> App (rename f a) (rename f b)
 
+    AbsTy n k a -> AbsTy n k $ rename f a
+    AppTy a t -> AppTy (rename f a) t
+
+renameTyExp :: (Int -> Int) -> Exp a -> Exp a
+renameTyExp f c =
+  case c of
+    Ann a b -> Ann (renameTyExp f a) (renameTy f b)
+
+    Name a -> Name a
+    Var a -> Var a
+    Thunk a -> Thunk $ renameTyExp f a
+    Ctor a bs -> Ctor a (renameTyExp f <$> bs)
+
+    Return a -> Return $ renameTyExp f a
+    Abs n ty a -> Abs n (renameTy f ty) (renameTyExp f a)
+    Bind n a b -> Bind n (renameTyExp f a) (renameTyExp f b)
+    Let n a b -> Let n (renameTyExp f a) (renameTyExp f b)
+    Fix a -> Fix $ renameTyExp f a
+    Force a -> Force $ renameTyExp f a
+    Case a bs ->
+      Case (renameTyExp f a) $
+      (\(Branch p e) -> Branch p $ renameTyExp f e) <$> bs
+    Dtor n b -> Dtor n $ renameTyExp f b
+    CoCase t bs ->
+      CoCase (renameTy f t) $
+      (\(CoBranch b e) -> CoBranch b $ renameTyExp f e) <$> bs
+    App a b -> App (renameTyExp f a) (renameTyExp f b)
+
+    AbsTy n k a -> AbsTy n k $ renameTyExp (rho f) a
+    AppTy a t -> AppTy (renameTyExp f a) (renameTy f t)
+
 sigma :: (Int -> Exp 'V) -> (Int -> Exp 'V)
 sigma _ 0 = Var 0
 sigma f n = rename (+1) $ f (n-1)
@@ -283,5 +318,39 @@ subst f c =
       CoCase a $ (\(CoBranch b e) -> CoBranch b $ subst f e) <$> bs
     App a b -> App (subst f a) (subst f b)
 
+    AbsTy n k a -> AbsTy n k $ subst f a
+    AppTy a t -> AppTy (subst f a) t
+
+substTyExp :: (Int -> Ty) -> Exp a -> Exp a
+substTyExp f c =
+  case c of
+    Ann a b -> Ann (substTyExp f a) (substTy f b)
+
+    Name a -> Name a
+    Var a -> Var a
+    Thunk a -> Thunk $ substTyExp f a
+    Ctor a bs -> Ctor a (substTyExp f <$> bs)
+
+    Return a -> Return $ substTyExp f a
+    Abs n ty a -> Abs n (substTy f ty) (substTyExp f a)
+    Bind n a b -> Bind n (substTyExp f a) (substTyExp f b)
+    Let n a b -> Let n (substTyExp f a) (substTyExp f b)
+    Fix a -> Fix $ substTyExp f a
+    Force a -> Force $ substTyExp f a
+    Case a bs ->
+      Case (substTyExp f a) $
+      (\(Branch p e) -> Branch p $ substTyExp f e) <$> bs
+    Dtor n b -> Dtor n $ substTyExp f b
+    CoCase t bs ->
+      CoCase (substTy f t) $
+      (\(CoBranch b e) -> CoBranch b $ substTyExp f e) <$> bs
+    App a b -> App (substTyExp f a) (substTyExp f b)
+
+    AbsTy n k a -> AbsTy n k $ substTyExp (sigmaTy f) a
+    AppTy a t -> AppTy (substTyExp f a) (substTy f t)
+
 inst :: Exp a -> Exp 'V -> Exp a
 inst a b = subst (\x -> if x == 0 then b else Var (x-1)) a
+
+instTyExp :: Exp a -> Ty -> Exp a
+instTyExp a b = substTyExp (\x -> if x == 0 then b else TVar (x-1)) a

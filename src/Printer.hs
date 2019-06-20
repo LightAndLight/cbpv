@@ -23,9 +23,29 @@ prettyPat p@(PCtor n _ _) =
     (fold . intersperse (Pretty.text ", ") $
      Pretty.text . Text.unpack <$> patNames p)
 
-prettyExp :: (Int -> Maybe Doc) -> Exp a -> Doc
-prettyExp names tm =
+prettyExp :: (Int -> Maybe Doc) -> (Int -> Maybe Doc) -> Exp a -> Doc
+prettyExp names tyNames tm =
   case tm of
+    AbsTy name k a ->
+      let m_ndoc = Pretty.text . Text.unpack <$> name in
+      Pretty.text "\\@" <>
+      Pretty.parens (foldMap (<> Pretty.space) m_ndoc <> Pretty.text ": " <> prettyKind k) <>
+      Pretty.text " -> " <>
+      prettyExp names (\case; 0 -> m_ndoc; n -> tyNames (n-1)) a
+    AppTy a t ->
+      (case a of
+         Abs{} -> Pretty.parens
+         Let{} -> Pretty.parens
+         Bind{} -> Pretty.parens
+         Case{} -> Pretty.parens
+         CoCase{} -> Pretty.parens
+         _ -> id)
+      (prettyExp names tyNames a) <>
+      Pretty.text " @" <>
+      (case t of
+         TApp{} -> Pretty.parens
+         _ -> id)
+      (prettyTy tyNames t)
     Name a -> Pretty.text $ Text.unpack a
     Ann a b ->
       (case a of
@@ -35,29 +55,29 @@ prettyExp names tm =
          Let{} -> Pretty.parens
          Bind{} -> Pretty.parens
          _ -> id)
-      (prettyExp names a) <>
+      (prettyExp names tyNames a) <>
       Pretty.text " : " <>
-      prettyTy (const Nothing) b
+      prettyTy tyNames b
     Var a ->
       fromMaybe (Pretty.char '#' <> Pretty.int a) $ names a
     Thunk a ->
       Pretty.text "thunk" <>
-      Pretty.brackets (prettyExp names a)
+      Pretty.brackets (prettyExp names tyNames a)
     Ctor a bs ->
       Pretty.text (Text.unpack a) <>
       Pretty.brackets
-        (fold . intersperse (Pretty.text ", ") $ prettyExp names <$> bs)
+        (fold . intersperse (Pretty.text ", ") $ prettyExp names tyNames <$> bs)
     Return a ->
       Pretty.text "return" <>
-      Pretty.brackets (prettyExp names a)
+      Pretty.brackets (prettyExp names tyNames a)
     Abs name a b ->
       let m_ndoc = Pretty.text . Text.unpack <$> name in
       Pretty.text "\\(" <>
       foldMap (<> Pretty.space) m_ndoc <>
       Pretty.text ": " <>
-      prettyTy (const Nothing) a <>
+      prettyTy tyNames a <>
       Pretty.text ") -> " <>
-      prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) b
+      prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) tyNames b
     Bind name a b ->
       let m_ndoc = Pretty.text . Text.unpack <$> name in
       Pretty.text "bind" <>
@@ -67,26 +87,26 @@ prettyExp names tm =
          Let{} -> Pretty.parens
          Bind{} -> Pretty.parens
          _ -> id)
-      (prettyExp names a) <>
+      (prettyExp names tyNames a) <>
       Pretty.text " in" Pretty.<$>
-      prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) b
+      prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) tyNames b
     Let name a b ->
       let m_ndoc = Pretty.text . Text.unpack <$> name in
       Pretty.text "let" <>
       foldMap (\x -> Pretty.space <> x <> Pretty.space) m_ndoc <>
       Pretty.text "= " <>
-      prettyExp names a <>
+      prettyExp names tyNames a <>
       Pretty.text " in" Pretty.<$>
-      prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) b
+      prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) tyNames b
     Fix a ->
       Pretty.text "fix" <>
-      Pretty.brackets (prettyExp names a)
+      Pretty.brackets (prettyExp names tyNames a)
     Force a ->
       Pretty.text "force" <>
-      Pretty.brackets (prettyExp names a)
+      Pretty.brackets (prettyExp names tyNames a)
     Case a bs ->
       Pretty.text "case " <>
-      prettyExp names a <>
+      prettyExp names tyNames a <>
       Pretty.text " of {" Pretty.<$>
       Pretty.indent 2
         (Pretty.vsep . NonEmpty.toList $
@@ -99,6 +119,7 @@ prettyExp names tm =
                  if n < arity
                  then Just $ fmap (Pretty.text . Text.unpack) (patNames p) !! n
                  else names (n-arity))
+              tyNames
               e) <$> bs) Pretty.<$>
       Pretty.char '}'
     Dtor a b ->
@@ -110,19 +131,19 @@ prettyExp names tm =
          Case{} -> Pretty.parens
          CoCase{} -> Pretty.parens
          _ -> id)
-      (prettyExp names b) <>
+      (prettyExp names tyNames b) <>
       Pretty.dot <>
       Pretty.text (Text.unpack a)
     CoCase a bs ->
       Pretty.text "cocase " <>
-      prettyTy (const Nothing) a <>
+      prettyTy tyNames a <>
       Pretty.text " of {" Pretty.<$>
       Pretty.indent 2
         (Pretty.vsep . NonEmpty.toList $
          (\(CoBranch d e) ->
             Pretty.text (Text.unpack d) <>
             Pretty.text " -> " <>
-            prettyExp names e) <$>
+            prettyExp names tyNames e) <$>
           bs) Pretty.<$>
       Pretty.char '}'
     App a b ->
@@ -133,13 +154,13 @@ prettyExp names tm =
          Case{} -> Pretty.parens
          CoCase{} -> Pretty.parens
          _ -> id)
-      (prettyExp names a) <>
+      (prettyExp names tyNames a) <>
       Pretty.space <>
       (case b of
-         Thunk{} -> Pretty.parens
-         Ctor _ (_:_) -> Pretty.parens
+         Let{} -> Pretty.parens
+         Case{} -> Pretty.parens
          _ -> id)
-      (prettyExp names b)
+      (prettyExp names tyNames b)
 
 prettyKind :: Kind -> Doc
 prettyKind k =

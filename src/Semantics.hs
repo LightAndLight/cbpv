@@ -9,6 +9,7 @@ import Syntax
 data Terminal
   = TReturn (Exp 'V)
   | TAbs (Exp 'C)
+  | TAbsTy (Exp 'C)
   | TCoCase (NonEmpty CoBranch)
   deriving Show
 
@@ -47,6 +48,11 @@ eval c =
       case eval a of
         TReturn x -> eval $ inst b x
         _ -> error "stuck: bind"
+    AbsTy _ _ a -> TAbsTy a
+    AppTy a ty ->
+      case eval a of
+        TAbsTy b -> eval $ instTyExp b ty
+        _ -> error "stuck: appTy"
     Let _ a b -> eval $ inst b a
     Fix a -> eval $ App a (Thunk $ Fix a)
     Force (Thunk x) -> eval x
