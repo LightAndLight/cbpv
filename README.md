@@ -56,9 +56,9 @@ tensorElim : {
 }
 tensorElim = thunk[ \f x -> case x of { Tensor[a, b] -> force[f] a b } ]
 
-data Nat = Z | S Nat
+data Nat = Z[] | S[Nat]
 
-data List (a : Val) = Nil | Cons a (List a)
+data List (a : Val) = Nil[] | Cons[a, List a]
 
 codata Pair (a : Comp) (b : Comp) where {
   fst : a;
