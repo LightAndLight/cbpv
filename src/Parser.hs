@@ -114,6 +114,9 @@ tkForce = satisfy (\case; TkForce{} -> True; _ -> False)
 tkLet :: MonadParsec e Tokens m => m Token
 tkLet = satisfy (\case; TkLet{} -> True; _ -> False)
 
+tkBind :: MonadParsec e Tokens m => m Token
+tkBind = satisfy (\case; TkBind{} -> True; _ -> False)
+
 tkWhere :: MonadParsec e Tokens m => m Token
 tkWhere = satisfy (\case; TkWhere{} -> True; _ -> False)
 
@@ -249,7 +252,7 @@ mkAnn inBlock ex =
 
 computation :: MonadParsec e Tokens m => Bool -> m (Exp 'C)
 computation inBlock =
-  (lam <|> ann <|> case_ <|> cocase <|> let_) <?> "computation"
+  (lam <|> ann <|> case_ <|> cocase <|> let_ <|> fix <|> bind) <?> "computation"
   where
     lam =
       (either
@@ -260,6 +263,18 @@ computation inBlock =
       computation inBlock
 
     let_ = mkLet inBlock computation
+
+    bind =
+      (\a b -> Bind (Just a) b . abstract a) <$ tkBind <*>
+      tkIdent <* tkEquals <*>
+      computation inBlock <* tkIn <*>
+      computation inBlock
+
+    fix =
+      (\n t -> Fix (Just n) t . abstract n) <$ tkFix <*>
+      tkIdent <* tkColon <*>
+      ty <* tkIn <*>
+      computation inBlock
 
     case_ = mkCase inBlock computation
 
@@ -282,7 +297,6 @@ computation inBlock =
       foldl (\a b -> Dtor b a) <$> atom <*> many (tkDot *> tkIdent)
 
     atom =
-      Fix <$ tkFix <*> brackets (computation True) <|>
       Return <$ tkReturn <*> brackets (value True) <|>
       Force <$ tkForce <*> brackets (value True) <|>
       parens (computation True)

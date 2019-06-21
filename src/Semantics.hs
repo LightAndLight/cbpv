@@ -54,7 +54,7 @@ eval c =
         TAbsTy b -> eval $ instTyExp b ty
         _ -> error "stuck: appTy"
     Let _ a b -> eval $ inst b a
-    Fix a -> eval $ App a (Thunk $ Fix a)
+    Fix _ _ a -> eval $ inst a (Thunk c)
     Force (Thunk x) -> eval x
     Force{} -> error "stuck: force"
     Case (Ctor n as) bs -> eval $ findBranch n as bs
