@@ -339,7 +339,8 @@ checkIndDecl decl = do
   unless (k == KVal) . throwError $ _KindMismatch # (KVal, k)
   for_ (_indCtors decl) $ \ctor ->
     locally envKinds (params <>) $
-    for_ (_indCtorArgs ctor) $ \argTy -> checkKind argTy KVal
+    for_ (_indCtorArgs ctor) $ \argTy ->
+      locally envIndDecls (decl :) $ checkKind argTy KVal
   where
     (params, k) = unfoldKArr (_indTypeKind decl)
 
@@ -352,7 +353,8 @@ checkCoIndDecl decl = do
   unless (k == KComp) . throwError $
     _KindMismatch # (KComp, k)
   for_ (_coIndDtors decl) $ \dtor ->
-    locally envKinds (params <>) $
+    locally envKinds (params <>) .
+    locally envCoIndDecls (decl :) $
     checkKind (_coIndDtorType dtor) KComp
   where
     (params, k) = unfoldKArr (_coIndTypeKind decl)

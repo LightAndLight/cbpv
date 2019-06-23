@@ -1,462 +1,277 @@
 {-# language DataKinds #-}
 {-# language FlexibleContexts #-}
 {-# language FlexibleInstances, MultiParamTypeClasses #-}
+{-# language GeneralizedNewtypeDeriving #-}
 {-# language LambdaCase #-}
 {-# language MultiWayIf, RecordWildCards#-}
+{-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language RankNTypes #-}
 {-# language TypeFamilies #-}
 module Parser where
 
-import Control.Applicative ((<|>), many, some, optional)
+import Control.Applicative (Alternative, (<|>), many, optional)
 import Control.Lens.Setter (over, mapped)
-import Data.Foldable (foldl')
+import Data.ByteString (ByteString)
+import Data.Char (isSpace)
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Maybe (fromMaybe)
+import Data.String (fromString)
 import Data.Text (Text)
-import Data.Void (Void)
-import Text.Megaparsec
-  ( (<?>), MonadParsec, Stream, satisfy, between, sepBy, sepBy1
-  )
+import Text.Parser.Combinators (Parsing, (<?>), sepBy, sepBy1, skipMany)
+import Text.Parser.Char (CharParsing, alphaNum, lower, upper, satisfy)
+import Text.Parser.Token (TokenParsing, IdentifierStyle(..), Unlined(..))
+import Text.Trifecta.Delta (Delta(..))
+import Text.Trifecta.Parser (runParser)
+import Text.Trifecta.Result (Result)
 
-import qualified Data.Text as Text
-import qualified Text.Megaparsec as Parsec
+import qualified Text.Parser.Token as Token
+import qualified Text.Parser.Token.Highlight as Highlight
 
-import Lexer
 import Syntax
 
-newtype Tokens = Tokens { getTokens :: [Token] }
-  deriving (Eq, Ord, Show)
+newtype Nesting m a = Nesting { runNesting :: m a }
+  deriving (Parsing, CharParsing, Functor, Applicative, Alternative, Monad)
 
-expandTab
-  :: Parsec.Pos
-  -> String
-  -> String
-expandTab w' = go 0
-  where
-    go 0 []        = []
-    go 0 ('\t':xs) = go w xs
-    go 0 (x:xs)    = x : go 0 xs
-    go n xs        = ' ' : go (n - 1) xs
-    w              = Parsec.unPos w'
+instance TokenParsing m => TokenParsing (Nesting m) where
+  someSpace = Nesting $ skipMany (satisfy isSpace)
 
-reachOffset'
-  :: forall s. Stream s
-  => (Int -> s -> (Parsec.Tokens s, s))
-     -- ^ How to split input stream at given offset
-  -> (forall b. (b -> Parsec.Token s -> b) -> b -> Parsec.Tokens s -> b)
-     -- ^ How to fold over input stream
-  -> (Parsec.Tokens s -> String)
-     -- ^ How to convert chunk of input stream into a 'String'
-  -> (Parsec.Token s -> String)
-     -- ^ How to convert a token into a 'Char'
-  -> (Parsec.Token s -> Bool, Parsec.Token s -> Bool)
-     -- ^ Newline token and tab token
-  -> Int
-     -- ^ Offset to reach
-  -> Parsec.PosState s
-     -- ^ Initial 'PosState' to use
-  -> (Parsec.SourcePos, String, Parsec.PosState s)
-     -- ^ Reached 'SourcePos', line at which 'SourcePos' is located, updated
-     -- 'PosState'
-reachOffset' splitAt'
-             foldl''
-             fromToks
-             fromTok
-             (newlineTok, tabTok)
-             o
-             Parsec.PosState {..} =
-  ( spos
-  , case expandTab pstateTabWidth
-           . addPrefix
-           . f
-           . fromToks
-           . fst
-           $ Parsec.takeWhile_ (not . newlineTok) post of
-      "" -> "<empty line>"
-      xs -> xs
-  , Parsec.PosState
-      { pstateInput = post
-      , pstateOffset = max pstateOffset o
-      , pstateSourcePos = spos
-      , pstateTabWidth = pstateTabWidth
-      , pstateLinePrefix =
-          if sameLine
-            -- NOTE We don't use difference lists here because it's
-            -- desirable for 'PosState' to be an instance of 'Eq' and
-            -- 'Show'. So we just do appending here. Fortunately several
-            -- parse errors on the same line should be relatively rare.
-            then pstateLinePrefix ++ f ""
-            else f ""
-      }
-  )
-  where
-    addPrefix xs =
-      if sameLine
-        then pstateLinePrefix ++ xs
-        else xs
-    sameLine = Parsec.sourceLine spos == Parsec.sourceLine pstateSourcePos
-    (pre, post) = splitAt' (o - pstateOffset) pstateInput
-    (spos, f) = foldl'' go (pstateSourcePos, id) pre
-    go (apos , g) ch =
-      let Parsec.SourcePos n l c = apos
-          c' = Parsec.unPos c
-          w  = Parsec.unPos pstateTabWidth
-      in if | newlineTok ch ->
-                (Parsec.SourcePos n (l <> Parsec.pos1) Parsec.pos1, id)
-            | tabTok ch ->
-                (Parsec.SourcePos n l (Parsec.mkPos $ c' + w - ((c' - 1) `rem` w)), g . (fromTok ch <>))
-            | otherwise ->
-                (Parsec.SourcePos n l (c <> Parsec.pos1), g . (fromTok ch <>))
+identStyle :: CharParsing m => IdentifierStyle m
+identStyle =
+  IdentifierStyle
+  { _styleName = "identifier"
+  , _styleStart = lower
+  , _styleLetter = alphaNum
+  , _styleReserved =
+    [ "force"
+    , "return"
+    , "thunk"
+    , "let"
+    , "fix"
+    , "bind"
+    , "in"
+    , "forall"
+    , "case"
+    , "cocase"
+    , "of"
+    , "data"
+    , "codata"
+    , "where"
+    ]
+  , _styleHighlight = Highlight.Identifier
+  , _styleReservedHighlight = Highlight.ReservedIdentifier
+  }
 
-instance Stream Tokens where
-  type Token Tokens = Token
-  type Tokens Tokens = [Token]
+ctorStyle :: CharParsing m => IdentifierStyle m
+ctorStyle =
+  IdentifierStyle
+  { _styleName = "constructor"
+  , _styleStart = upper
+  , _styleLetter = alphaNum
+  , _styleReserved = ["Val", "Comp"]
+  , _styleHighlight = Highlight.Constructor
+  , _styleReservedHighlight = Highlight.ReservedConstructor
+  }
 
-  tokensToChunk _ = id
-  chunkToTokens _ = id
-  chunkLength _ = length
-  take1_ (Tokens ts) =
-    case ts of
-      [] -> Nothing
-      x : xs -> Just (x, Tokens xs)
-  takeN_ n (Tokens ts)
-    | n <= 0 = Just ([], Tokens ts)
-    | otherwise =
-      case ts of
-        [] -> Nothing
-        _ -> let (a, b) = splitAt n ts in Just (a, Tokens b)
-  takeWhile_ p (Tokens ts) = let (a, b) = span p ts in (a, Tokens b)
-  showTokens _ (a :| as) = show (a:as)
-  reachOffset =
-    reachOffset'
-      (\n (Tokens t) -> let (a, b) = splitAt n t in (a, Tokens b))
-      foldl'
-      (Text.unpack . foldMap getText)
-      (Text.unpack . getText)
-      ( \case; TkNewline{} -> True; _ -> False
-      , \_ -> False
-      )
+ctor :: (Monad m, TokenParsing m) => m Text
+ctor = Token.ident ctorStyle
 
-tkSpace :: MonadParsec e Tokens m => m Token
-tkSpace = satisfy (\case; TkSpace{} -> True; _ -> False)
+ident :: (Monad m, TokenParsing m) => m Text
+ident = Token.ident identStyle
 
-tkNewline :: MonadParsec e Tokens m => m Token
-tkNewline = satisfy (\case; TkNewline{} -> True; _ -> False)
+keyword :: (Monad m, TokenParsing m) => Text -> m ()
+keyword = Token.reserveText identStyle
 
-space :: MonadParsec e Tokens m => Bool -> m Token
-space True = tkSpace <|> tkNewline
-space False = tkSpace
+arrow :: TokenParsing m => m Text
+arrow = Token.textSymbol "->"
 
-tkLParen :: MonadParsec e Tokens m => m Token
-tkLParen = satisfy (\case; TkLParen{} -> True; _ -> False)
+val :: (Monad m, TokenParsing m) => m ()
+val = Token.reserveText ctorStyle "Val"
 
-tkRParen :: MonadParsec e Tokens m => m Token
-tkRParen = satisfy (\case; TkRParen{} -> True; _ -> False)
+comp :: (Monad m, TokenParsing m) => m ()
+comp = Token.reserveText ctorStyle "Comp"
 
-tkLBracket :: MonadParsec e Tokens m => m Token
-tkLBracket = satisfy (\case; TkLBracket{} -> True; _ -> False)
-
-tkRBracket :: MonadParsec e Tokens m => m Token
-tkRBracket = satisfy (\case; TkRBracket{} -> True; _ -> False)
-
-tkLBrace :: MonadParsec e Tokens m => m Token
-tkLBrace = satisfy (\case; TkLBrace{} -> True; _ -> False)
-
-tkRBrace :: MonadParsec e Tokens m => m Token
-tkRBrace = satisfy (\case; TkRBrace{} -> True; _ -> False)
-
-tkForall :: MonadParsec e Tokens m => m Token
-tkForall = satisfy (\case; TkForall{} -> True; _ -> False)
-
-tkColon :: MonadParsec e Tokens m => m Token
-tkColon = satisfy (\case; TkColon{} -> True; _ -> False)
-
-tkSemicolon :: MonadParsec e Tokens m => m Token
-tkSemicolon = satisfy (\case; TkSemicolon{} -> True; _ -> False)
-
-tkDot :: MonadParsec e Tokens m => m Token
-tkDot = satisfy (\case; TkDot{} -> True; _ -> False)
-
-tkPipe :: MonadParsec e Tokens m => m Token
-tkPipe = satisfy (\case; TkPipe{} -> True; _ -> False)
-
-tkAt :: MonadParsec e Tokens m => m Token
-tkAt = satisfy (\case; TkAt{} -> True; _ -> False)
-
-tkComma :: MonadParsec e Tokens m => m Token
-tkComma = satisfy (\case; TkComma{} -> True; _ -> False)
-
-tkArrow :: MonadParsec e Tokens m => m Token
-tkArrow = satisfy (\case; TkArrow{} -> True; _ -> False)
-
-tkVal :: MonadParsec e Tokens m => m Token
-tkVal = satisfy (\case; TkVal{} -> True; _ -> False)
-
-tkComp :: MonadParsec e Tokens m => m Token
-tkComp = satisfy (\case; TkComp{} -> True; _ -> False)
-
-tkThunk :: MonadParsec e Tokens m => m Token
-tkThunk = satisfy (\case; TkThunk{} -> True; _ -> False)
-
-tkReturn :: MonadParsec e Tokens m => m Token
-tkReturn = satisfy (\case; TkReturn{} -> True; _ -> False)
-
-tkForce :: MonadParsec e Tokens m => m Token
-tkForce = satisfy (\case; TkForce{} -> True; _ -> False)
-
-tkLet :: MonadParsec e Tokens m => m Token
-tkLet = satisfy (\case; TkLet{} -> True; _ -> False)
-
-tkEof :: MonadParsec e Tokens m => m Token
-tkEof = satisfy (\case; TkEof{} -> True; _ -> False)
-
-tkBind :: MonadParsec e Tokens m => m Token
-tkBind = satisfy (\case; TkBind{} -> True; _ -> False)
-
-tkWhere :: MonadParsec e Tokens m => m Token
-tkWhere = satisfy (\case; TkWhere{} -> True; _ -> False)
-
-tkData :: MonadParsec e Tokens m => m Token
-tkData = satisfy (\case; TkData{} -> True; _ -> False)
-
-tkCodata :: MonadParsec e Tokens m => m Token
-tkCodata = satisfy (\case; TkCodata{} -> True; _ -> False)
-
-tkFix :: MonadParsec e Tokens m => m Token
-tkFix = satisfy (\case; TkFix{} -> True; _ -> False)
-
-tkEquals :: MonadParsec e Tokens m => m Token
-tkEquals = satisfy (\case; TkEquals{} -> True; _ -> False)
-
-tkIn :: MonadParsec e Tokens m => m Token
-tkIn = satisfy (\case; TkIn{} -> True; _ -> False)
-
-tkCase :: MonadParsec e Tokens m => m Token
-tkCase = satisfy (\case; TkCase{} -> True; _ -> False)
-
-tkCoCase :: MonadParsec e Tokens m => m Token
-tkCoCase = satisfy (\case; TkCoCase{} -> True; _ -> False)
-
-tkOf :: MonadParsec e Tokens m => m Token
-tkOf = satisfy (\case; TkOf{} -> True; _ -> False)
-
-tkBackslash :: MonadParsec e Tokens m => m Token
-tkBackslash = satisfy (\case; TkBackslash{} -> True; _ -> False)
-
-tkUnderscore :: MonadParsec e Tokens m => m Token
-tkUnderscore = satisfy (\case; TkUnderscore{} -> True; _ -> False)
-
-tkIdent :: MonadParsec e Tokens m => m Text
-tkIdent =
-  (\case; TkIdent a _ -> a; _ -> undefined) <$>
-  satisfy (\case; TkIdent{} -> True; _ -> False)
-
-tkCtor :: MonadParsec e Tokens m => m Text
-tkCtor =
-  (\case; TkCtor a _ -> a; _ -> undefined) <$>
-  satisfy (\case; TkCtor{} -> True; _ -> False)
-
-parens :: MonadParsec e Tokens m => m a -> m a
-parens = between tkLParen tkRParen
-
-brackets :: MonadParsec e Tokens m => m a -> m a
-brackets = between tkLBracket tkRBracket
-
-braces :: MonadParsec e Tokens m => m a -> m a
-braces = between tkLBrace tkRBrace
-
-ctor :: MonadParsec e Tokens m => Text -> m Token
-ctor t = satisfy (\case; TkCtor t' _ -> t == t'; _ -> False)
-
-ident :: MonadParsec e Tokens m => Text -> m Token
-ident t = satisfy (\case; TkIdent t' _ -> t == t'; _ -> False)
-
-kind :: MonadParsec e Tokens m => m Kind
-kind = foldr KArr <$> atom <*> many (tkArrow *> atom)
+kind :: (Monad m, TokenParsing m) => m Kind
+kind = foldr KArr <$> atom <*> many (arrow *> atom)
   where
     atom =
-      KVal <$ tkVal <|>
-      KComp <$ tkComp <|>
-      parens kind
+      KVal <$ val <|>
+      KComp <$ comp <|>
+      Token.parens kind
 
-ty :: MonadParsec e Tokens m => m Ty
+ty :: (Monad m, TokenParsing m) => m Ty
 ty = (fa <|> arr) <?> "type"
   where
     fa =
-      (\(a, b) -> TForall (Just a) b . abstractTy a) <$ tkForall <*>
-      parens ((,) <$> tkIdent <* tkColon <*> kind) <* tkDot <*>
+      (\(a, b) -> TForall (Just a) b . abstractTy a) <$ keyword "forall" <*>
+      Token.parens ((,) <$> ident <* Token.colon <*> kind) <* Token.dot <*>
       ty
-    arr = (\a -> maybe a (TApp $ TApp Arrow a)) <$> app <*> optional (tkArrow *> arr)
-    app = foldl TApp <$> atom <*> many (space False *> atom)
+    arr = (\a -> maybe a (TApp $ TApp Arrow a)) <$> app <*> optional (arrow *> arr)
+    app = foldl TApp <$> atom <*> many atom
     atom =
-      U <$ ctor "U" <|>
-      F <$ ctor "F" <|>
-      TCtor <$> tkCtor <|>
-      TName <$> tkIdent <|>
-      parens (Arrow <$ tkArrow <|> ty)
+      (\case; "U" -> U; "F" -> F; c -> TCtor c) <$> ctor <|>
+      TName <$> ident <|>
+      Token.parens (Arrow <$ arrow <|> ty)
 
-pattern_ :: MonadParsec e Tokens m => m (Pattern, [Text])
+pattern_ :: (Monad m, TokenParsing m) => m (Pattern, [Text])
 pattern_ =
-  (PWild, []) <$ tkUnderscore <|>
-  (\a -> (PVar $ Just a, [a])) <$> tkIdent <|>
+  (PWild, []) <$ Token.symbolic '_' <|>
+  (\a -> (PVar $ Just a, [a])) <$> ident <|>
   (\a bs -> (PCtor a (length bs) bs, bs)) <$>
-    tkCtor <*>
-    brackets (tkIdent `sepBy` tkComma)
+    ctor <*>
+    Token.brackets (ident `sepBy` Token.comma)
 
-branch :: MonadParsec e Tokens m => (Bool -> m (Exp a)) -> m (Branch a)
+branch :: (Monad m, TokenParsing m) => m (Exp a) -> m (Branch a)
 branch ex =
   (\(p, vs) e -> Branch p $ foldr abstract e vs) <$>
-  pattern_ <* tkArrow <*>
-  ex True
+  pattern_ <* arrow <*>
+  ex
 
-cobranch :: MonadParsec e Tokens m => m CoBranch
+cobranch :: (Monad m, TokenParsing m) => m CoBranch
 cobranch =
   CoBranch <$>
-  tkIdent <* tkArrow <*>
-  computation True
-
+  ident <* arrow <*>
+  computation
 
 mkCase ::
-  MonadParsec e Tokens m =>
-  Bool -> (Bool -> m (Exp a)) -> m (Exp a)
-mkCase inBlock ex =
-  Case <$ tkCase <*>
-  value inBlock <* tkOf <*>
-  braces
-    ((:|) <$>
-      branch ex <*>
-      many (tkSemicolon *> branch ex))
+  (Monad m, TokenParsing m) =>
+  (forall n. (Monad n, TokenParsing n) => n (Exp a)) ->
+  m (Exp a)
+mkCase ex =
+  Case <$ keyword "case" <*>
+  value <* keyword "of" <*>
+  runNesting
+    (Token.braces $
+     (:|) <$>
+     branch ex <*>
+     many (Token.semi *> branch ex))
 
 mkLet ::
-  MonadParsec e Tokens m =>
-  Bool ->
-  (Bool -> m (Exp a)) ->
+  (Monad m, TokenParsing m) =>
+  m (Exp a) ->
   m (Exp a)
-mkLet inBlock exbody =
-  (\a b -> Let (Just a) b . abstract a) <$ tkLet <*>
-  tkIdent <* tkEquals <*>
-  value inBlock <* tkIn <*>
-  exbody inBlock
+mkLet exbody =
+  (\a b -> Let (Just a) b . abstract a) <$ keyword "let" <*>
+  ident <* Token.symbolic '=' <*>
+  value <* keyword "in" <*>
+  exbody
 
 mkAnn ::
-  MonadParsec e Tokens m =>
-  Bool ->
-  (Bool -> m (Exp a)) ->
+  (Monad m, TokenParsing m) =>
+  m (Exp a) ->
   m (Exp a)
-mkAnn inBlock ex =
-  (\a -> maybe a (Ann a)) <$> ex inBlock <*> optional (tkColon *> ty)
+mkAnn ex =
+  (\a -> maybe a (Ann a)) <$> ex <*> optional (Token.colon *> ty)
 
-computation :: MonadParsec e Tokens m => Bool -> m (Exp 'C)
-computation inBlock =
+computation :: (Monad m, TokenParsing m) => m (Exp 'C)
+computation =
   (lam <|> ann <|> case_ <|> cocase <|> let_ <|> fix <|> bind) <?> "computation"
   where
     lam =
       (either
          (\(a, b) -> Abs (Just a) b . abstract a)
-         (\(a, b) -> AbsTy (Just a) b . abstractTyExp a)) <$ tkBackslash <*>
-      (Left <$> parens ((,) <$> tkIdent <* tkColon <*> ty) <|>
-       Right <$ tkAt <*> parens ((,) <$> tkIdent <* tkColon <*> kind)) <* tkArrow <*>
-      computation inBlock
+         (\(a, b) -> AbsTy (Just a) b . abstractTyExp a)) <$ Token.symbolic '\\' <*>
+      (Left <$> Token.parens ((,) <$> ident <* Token.colon <*> ty) <|>
+       Right <$ Token.symbolic '@' <*>
+       Token.parens ((,) <$> ident <* Token.colon <*> kind)) <* arrow <*>
+      computation
 
-    let_ = mkLet inBlock computation
+    let_ = mkLet computation
 
     bind =
-      (\a b -> Bind (Just a) b . abstract a) <$ tkBind <*>
-      tkIdent <* tkEquals <*>
-      computation inBlock <* tkIn <*>
-      computation inBlock
+      (\a b -> Bind (Just a) b . abstract a) <$ keyword "bind" <*>
+      ident <* Token.symbolic '=' <*>
+      computation <* keyword "in" <*>
+      computation
 
     fix =
-      (\n t -> Fix (Just n) t . abstract n) <$ tkFix <*>
-      tkIdent <* tkColon <*>
-      ty <* tkIn <*>
-      computation inBlock
+      (\n t -> Fix (Just n) t . abstract n) <$ keyword "fix" <*>
+      ident <* Token.colon <*>
+      ty <* keyword "in" <*>
+      computation
 
-    case_ = mkCase inBlock computation
+    case_ = mkCase computation
 
     cocase =
-      CoCase <$ tkCoCase <*>
-      ty <* tkOf <*>
-      braces ((:|) <$> cobranch <*> many (tkSemicolon *> cobranch))
+      CoCase <$ keyword "cocase" <*>
+      ty <* keyword "of" <*>
+      runNesting (Token.braces $ (:|) <$> cobranch <*> many (Token.semi *> cobranch))
 
-    ann = mkAnn inBlock app
+    ann = mkAnn app
 
-    app ib =
+    app =
       foldl (\b -> either (App b) (AppTy b)) <$>
       dtor <*>
-      many
-        (space ib *>
-         (Left <$> value ib <|>
-          Right <$ tkAt <*> ty))
+      many (Left <$> value <|> Right <$ Token.symbolic '@' <*> ty)
 
     dtor =
-      foldl (\a b -> Dtor b a) <$> atom <*> many (tkDot *> tkIdent)
+      foldl (\a b -> Dtor b a) <$> atom <*> many (Token.dot *> ident)
 
     atom =
-      Return <$ tkReturn <*> brackets (value True) <|>
-      Force <$ tkForce <*> brackets (value True) <|>
-      parens (computation True)
+      Return <$ keyword "return" <*> Token.brackets value <|>
+      Force <$ keyword "force" <*> Token.brackets value <|>
+      Token.parens computation
 
-value :: MonadParsec e Tokens m => Bool -> m (Exp 'V)
-value inBlock = (case_ <|> let_ <|> ann <|> absTy) <?> "value"
+value :: (Monad m, TokenParsing m) => m (Exp 'V)
+value = (case_ <|> let_ <|> ann <|> absTy) <?> "value"
   where
-    ann = mkAnn inBlock atom
+    ann = mkAnn atom
     absTy =
-      (\(a, b) -> AbsTy (Just a) b . abstractTyExp a) <$ tkBackslash <* tkAt <*>
-      parens ((,) <$> tkIdent <* tkColon <*> kind) <* tkArrow <*>
-      value inBlock
-    let_ = mkLet inBlock value
-    case_ = mkCase inBlock value
-    atom ib =
-      Name <$> tkIdent <|>
-      Thunk <$ tkThunk <*> brackets (computation True) <|>
-      Ctor <$> tkCtor <*> brackets (sepBy (value True) tkComma) <|>
-      parens (value ib)
+      (\(a, b) -> AbsTy (Just a) b . abstractTyExp a) <$ Token.symbolic '\\' <* Token.symbolic '@' <*>
+      Token.parens ((,) <$> ident <* Token.colon <*> kind) <* arrow <*>
+      value
+    let_ = mkLet value
+    case_ = mkCase value
+    atom =
+      Thunk <$ keyword "thunk" <*> Token.brackets computation <|>
+      Name <$> ident <|>
+      Ctor <$> ctor <*> Token.brackets (sepBy value Token.comma) <|>
+      Token.parens value
 
-indDecl :: MonadParsec e Tokens m => m IndDecl
+indDecl :: (Monad m, TokenParsing m) => m IndDecl
 indDecl =
   (\n ps mctors ->
      let (pns, ks) = unzip ps in
      IndDecl n pns (foldr KArr KVal ks) $
-     maybe [] (over (mapped.indCtorArgs.mapped) (abstractTys pns)) mctors) <$ tkData <*>
-  tkCtor <* optional tkSpace <*>
-  sepBy (parens $ (,) <$> tkIdent <* tkColon <*> kind) tkSpace <*>
-  optional (tkEquals *> sepBy1 ctorDecl tkPipe)
+     maybe [] (over (mapped.indCtorArgs.mapped) (abstractTys pns)) mctors) <$ keyword "data" <*>
+  ctor <*>
+  many (Token.parens $ (,) <$> ident <* Token.colon <*> kind) <*>
+  optional (Token.symbolic '=' *> sepBy1 ctorDecl (Token.symbolic '|'))
   where
-    ctorDecl :: MonadParsec e Tokens m => m IndCtor
     ctorDecl =
       (\n ps -> IndCtor n (length ps) ps) <$>
-      tkCtor <*>
-      brackets (sepBy ty tkComma)
+      ctor <*>
+      Token.brackets (sepBy ty Token.comma)
 
-coIndDecl :: MonadParsec e Tokens m => m CoIndDecl
+coIndDecl :: (Monad m, TokenParsing m) => m CoIndDecl
 coIndDecl =
   (\n ps mdtors ->
      let (pns, ks) = unzip ps in
      CoIndDecl n pns (foldr KArr KComp ks) $
-     maybe [] (over (mapped.coIndDtorType) (abstractTys pns)) mdtors) <$ tkCodata <*>
-  tkCtor <* optional tkSpace <*>
-  sepBy (parens $ (,) <$> tkIdent <* tkColon <*> kind) tkSpace <*>
-  optional (tkWhere *> braces (sepBy1 dtorDecl tkSemicolon))
+     maybe [] (over (mapped.coIndDtorType) (abstractTys pns)) mdtors) <$ keyword "codata" <*>
+  ctor <*>
+  many (Token.parens $ (,) <$> ident <* Token.colon <*> kind) <*>
+  optional (keyword "where" *> runNesting (Token.braces $ sepBy1 dtorDecl Token.semi))
   where
-    dtorDecl :: MonadParsec e Tokens m => m CoIndDtor
-    dtorDecl = CoIndDtor <$> tkIdent <* tkColon <*> ty
+    dtorDecl = CoIndDtor <$> ident <* Token.colon <*> ty
 
-decl :: MonadParsec e Tokens m => m Decl
-decl = Decl <$> tkIdent <* tkEquals <*> (braces (value True) <|> value False)
+decl :: (Monad m, TokenParsing m) => m Decl
+decl =
+  Decl <$>
+  ident <* Token.symbolic '=' <*>
+  (runNesting (Token.braces value) <|> value)
 
-module_ :: MonadParsec e Tokens m => m Module
+module_ :: (Monad m, TokenParsing m) => m Module
 module_ =
-  MEmpty <$ many tkSpace <* tkEof <|>
-  MDecl <$> decl <*> rest <|>
-  MIndDecl <$> indDecl <*> rest <|>
-  MCoIndDecl <$> coIndDecl <*> rest
+  MDecl <$> runUnlined decl <*> rest <|>
+  MIndDecl <$> runUnlined indDecl <*> rest <|>
+  MCoIndDecl <$> runUnlined coIndDecl <*> rest <|>
+  pure MEmpty
   where
-    rest = fromMaybe MEmpty <$> optional (some tkNewline *> module_)
+    rest = fromMaybe MEmpty <$> optional (Token.whiteSpace *> module_)
 
 parse ::
   String ->
-  (forall m. MonadParsec Void Tokens m => m a) ->
-  Tokens -> Either (Parsec.ParseErrorBundle Tokens Void) a
-parse s m = Parsec.parse m s
+  (forall m. (Monad m, TokenParsing m) => m a) ->
+  ByteString -> Result a
+parse s m = runParser m (Directed (fromString s) 0 0 0 0)
