@@ -16,9 +16,12 @@ import Control.Monad.Except
   (MonadError, runExcept, throwError, catchError)
 import Control.Monad.Reader (MonadReader, runReaderT, asks)
 import Data.Foldable (traverse_, for_)
+import Data.Map (Map)
 import Data.Semigroup.Foldable (foldlM1)
 import Data.Text (Text)
 import Data.Traversable (for)
+
+import qualified Data.Map as Map
 
 import Syntax
 
@@ -142,10 +145,21 @@ data TCEnv
   = TCEnv
   { _envTypes :: [Ty]
   , _envKinds :: [Kind]
+  , _envDecls :: Map Text (Exp 'V, Ty)
   , _envIndDecls :: [IndDecl]
   , _envCoIndDecls :: [CoIndDecl]
   }
 makeLenses ''TCEnv
+
+emptyTCEnv :: TCEnv
+emptyTCEnv = TCEnv mempty mempty mempty mempty mempty
+
+lookupDecl :: (MonadReader TCEnv m, AsScopeError e, MonadError e m) => Text -> m (Exp 'V, Ty)
+lookupDecl n = do
+  res <- asks $ Map.lookup n . _envDecls
+  case res of
+    Nothing -> throwError $ _UnboundName # n
+    Just a -> pure a
 
 instance HasIndDecls TCEnv where; indDecls = envIndDecls
 instance HasCoIndDecls TCEnv where; coIndDecls = envCoIndDecls
@@ -244,7 +258,9 @@ infer c =
     AbsTy n k a -> do
       aTy <- locally envKinds (k :) $ infer a
       pure $ TForall n k aTy
-    Name n -> throwError $ _UnboundName # n
+    Name n -> do
+      (_, ty) <- lookupDecl n
+      pure ty
     Var n -> do
       ctx <- asks _envTypes
       case ix n ctx of
@@ -343,6 +359,32 @@ checkCoIndDecl decl = do
     checkKind (_coIndDtorType dtor) KComp
   where
     (params, k) = unfoldKArr (_coIndTypeKind decl)
+
+checkDecl ::
+  ( MonadReader TCEnv m
+  , AsScopeError e, AsTypeError e, AsKindError e, MonadError e m
+  ) =>
+  Decl -> m (Text, Exp 'V, Ty)
+checkDecl (Decl n e) = do
+  ty <- infer e
+  pure (n, e, ty)
+
+checkModule ::
+  ( MonadReader TCEnv m
+  , AsScopeError e, AsTypeError e, AsKindError e, MonadError e m
+  ) =>
+  Module ->
+  m ()
+checkModule MEmpty = pure ()
+checkModule (MDecl d rest) = do
+  (n, e, ty) <- checkDecl d
+  locally envDecls (Map.insert n (e, ty)) $ checkModule rest
+checkModule (MIndDecl d rest) = do
+  checkIndDecl d
+  locally envIndDecls (d :) $ checkModule rest
+checkModule (MCoIndDecl d rest) = do
+  checkCoIndDecl d
+  locally envCoIndDecls (d :) $ checkModule rest
 
 data TCError
   = TCScopeError ScopeError

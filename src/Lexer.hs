@@ -92,6 +92,47 @@ append tk txt =
     TkColon a b -> Just $ TkColon a (b <> txt)
     TkEof{} -> Nothing
 
+getText :: Token -> Text
+getText tk =
+  case tk of
+    TkForall a b -> a <> b
+    TkData a b -> a <> b
+    TkCodata a b -> a <> b
+    TkComma a b -> a <> b
+    TkUnderscore a b -> a <> b
+    TkNewline a b -> a <> b
+    TkSpace a -> a
+    TkBackslash a b -> a <> b
+    TkVal a b -> a <> b
+    TkComp a b -> a <> b
+    TkFix a -> a
+    TkLet a b -> a <> b
+    TkWhere a b -> a <> b
+    TkBind a b -> a <> b
+    TkIn a b -> a <> b
+    TkReturn a -> a
+    TkThunk a -> a
+    TkForce a -> a
+    TkIdent a b -> a <> b
+    TkCtor a b -> a <> b
+    TkPipe a b -> a <> b
+    TkDot a b -> a <> b
+    TkAt a b -> a <> b
+    TkLBrace a b -> a <> b
+    TkRBrace a b -> a <> b
+    TkLBracket a b -> a <> b
+    TkRBracket a b -> a <> b
+    TkLParen a b -> a <> b
+    TkRParen a b -> a <> b
+    TkEquals a b -> a <> b
+    TkArrow a b -> a <> b
+    TkCase a b -> a <> b
+    TkCoCase a b -> a <> b
+    TkOf a b -> a <> b
+    TkSemicolon a b -> a <> b
+    TkColon a b -> a <> b
+    TkEof a -> a
+
 isSpace :: Char -> Bool
 isSpace = (||) <$> (== ' ') <*> (== '\t')
 

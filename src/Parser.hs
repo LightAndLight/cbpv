@@ -2,19 +2,24 @@
 {-# language FlexibleContexts #-}
 {-# language FlexibleInstances, MultiParamTypeClasses #-}
 {-# language LambdaCase #-}
+{-# language MultiWayIf, RecordWildCards#-}
 {-# language OverloadedStrings #-}
 {-# language RankNTypes #-}
 {-# language TypeFamilies #-}
 module Parser where
 
-import Control.Applicative ((<|>), many, optional)
+import Control.Applicative ((<|>), many, some, optional)
 import Control.Lens.Setter (over, mapped)
+import Data.Foldable (foldl')
 import Data.List.NonEmpty (NonEmpty(..))
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Void (Void)
 import Text.Megaparsec
-  ((<?>), MonadParsec, Stream, satisfy, between, sepBy, sepBy1)
+  ( (<?>), MonadParsec, Stream, satisfy, between, sepBy, sepBy1
+  )
 
+import qualified Data.Text as Text
 import qualified Text.Megaparsec as Parsec
 
 import Lexer
@@ -22,6 +27,87 @@ import Syntax
 
 newtype Tokens = Tokens { getTokens :: [Token] }
   deriving (Eq, Ord, Show)
+
+expandTab
+  :: Parsec.Pos
+  -> String
+  -> String
+expandTab w' = go 0
+  where
+    go 0 []        = []
+    go 0 ('\t':xs) = go w xs
+    go 0 (x:xs)    = x : go 0 xs
+    go n xs        = ' ' : go (n - 1) xs
+    w              = Parsec.unPos w'
+
+reachOffset'
+  :: forall s. Stream s
+  => (Int -> s -> (Parsec.Tokens s, s))
+     -- ^ How to split input stream at given offset
+  -> (forall b. (b -> Parsec.Token s -> b) -> b -> Parsec.Tokens s -> b)
+     -- ^ How to fold over input stream
+  -> (Parsec.Tokens s -> String)
+     -- ^ How to convert chunk of input stream into a 'String'
+  -> (Parsec.Token s -> String)
+     -- ^ How to convert a token into a 'Char'
+  -> (Parsec.Token s -> Bool, Parsec.Token s -> Bool)
+     -- ^ Newline token and tab token
+  -> Int
+     -- ^ Offset to reach
+  -> Parsec.PosState s
+     -- ^ Initial 'PosState' to use
+  -> (Parsec.SourcePos, String, Parsec.PosState s)
+     -- ^ Reached 'SourcePos', line at which 'SourcePos' is located, updated
+     -- 'PosState'
+reachOffset' splitAt'
+             foldl''
+             fromToks
+             fromTok
+             (newlineTok, tabTok)
+             o
+             Parsec.PosState {..} =
+  ( spos
+  , case expandTab pstateTabWidth
+           . addPrefix
+           . f
+           . fromToks
+           . fst
+           $ Parsec.takeWhile_ (not . newlineTok) post of
+      "" -> "<empty line>"
+      xs -> xs
+  , Parsec.PosState
+      { pstateInput = post
+      , pstateOffset = max pstateOffset o
+      , pstateSourcePos = spos
+      , pstateTabWidth = pstateTabWidth
+      , pstateLinePrefix =
+          if sameLine
+            -- NOTE We don't use difference lists here because it's
+            -- desirable for 'PosState' to be an instance of 'Eq' and
+            -- 'Show'. So we just do appending here. Fortunately several
+            -- parse errors on the same line should be relatively rare.
+            then pstateLinePrefix ++ f ""
+            else f ""
+      }
+  )
+  where
+    addPrefix xs =
+      if sameLine
+        then pstateLinePrefix ++ xs
+        else xs
+    sameLine = Parsec.sourceLine spos == Parsec.sourceLine pstateSourcePos
+    (pre, post) = splitAt' (o - pstateOffset) pstateInput
+    (spos, f) = foldl'' go (pstateSourcePos, id) pre
+    go (apos , g) ch =
+      let Parsec.SourcePos n l c = apos
+          c' = Parsec.unPos c
+          w  = Parsec.unPos pstateTabWidth
+      in if | newlineTok ch ->
+                (Parsec.SourcePos n (l <> Parsec.pos1) Parsec.pos1, id)
+            | tabTok ch ->
+                (Parsec.SourcePos n l (Parsec.mkPos $ c' + w - ((c' - 1) `rem` w)), g . (fromTok ch <>))
+            | otherwise ->
+                (Parsec.SourcePos n l (c <> Parsec.pos1), g . (fromTok ch <>))
 
 instance Stream Tokens where
   type Token Tokens = Token
@@ -42,7 +128,15 @@ instance Stream Tokens where
         _ -> let (a, b) = splitAt n ts in Just (a, Tokens b)
   takeWhile_ p (Tokens ts) = let (a, b) = span p ts in (a, Tokens b)
   showTokens _ (a :| as) = show (a:as)
-  reachOffset = error "reachOffset: NIH"
+  reachOffset =
+    reachOffset'
+      (\n (Tokens t) -> let (a, b) = splitAt n t in (a, Tokens b))
+      foldl'
+      (Text.unpack . foldMap getText)
+      (Text.unpack . getText)
+      ( \case; TkNewline{} -> True; _ -> False
+      , \_ -> False
+      )
 
 tkSpace :: MonadParsec e Tokens m => m Token
 tkSpace = satisfy (\case; TkSpace{} -> True; _ -> False)
@@ -113,6 +207,9 @@ tkForce = satisfy (\case; TkForce{} -> True; _ -> False)
 
 tkLet :: MonadParsec e Tokens m => m Token
 tkLet = satisfy (\case; TkLet{} -> True; _ -> False)
+
+tkEof :: MonadParsec e Tokens m => m Token
+tkEof = satisfy (\case; TkEof{} -> True; _ -> False)
 
 tkWhere :: MonadParsec e Tokens m => m Token
 tkWhere = satisfy (\case; TkWhere{} -> True; _ -> False)
@@ -334,6 +431,15 @@ coIndDecl =
 
 decl :: MonadParsec e Tokens m => m Decl
 decl = Decl <$> tkIdent <* tkEquals <*> (braces (value True) <|> value False)
+
+module_ :: MonadParsec e Tokens m => m Module
+module_ =
+  MEmpty <$ many tkSpace <* tkEof <|>
+  MDecl <$> decl <*> rest <|>
+  MIndDecl <$> indDecl <*> rest <|>
+  MCoIndDecl <$> coIndDecl <*> rest
+  where
+    rest = fromMaybe MEmpty <$> optional (some tkNewline *> module_)
 
 parse ::
   String ->

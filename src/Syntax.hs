@@ -19,6 +19,13 @@ import qualified Data.Set as Set
 
 data Sort = C | V
 
+data Module
+  = MEmpty
+  | MDecl Decl Module
+  | MIndDecl IndDecl Module
+  | MCoIndDecl CoIndDecl Module
+  deriving Show
+
 data Decl
   = Decl
   { _declName :: !Text

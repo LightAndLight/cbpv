@@ -1,0 +1,82 @@
+data Sum (a : Val) (b : Val) = Left[a] | Right[b]
+
+sumElim = {
+  thunk[ 
+    \@(a : Val) ->
+    \@(b : Val) ->
+    \@(r : Comp) ->
+    \(f : U (a -> r)) ->
+    \(g : U (b -> r)) ->
+    \(x : Sum a b) ->
+    case x of { 
+      Left[a] -> force[f] a; 
+      Right[a] -> force[g] a 
+    } 
+  ]
+}
+
+data Tensor (a : Val) (b : Val) = Tensor[a, b]
+
+tensorElim = {
+  thunk[ 
+    \@(a : Val) ->
+    \@(b : Val) ->
+    \@(r : Comp) ->
+    \(f : U (a -> b -> r)) ->
+    \(x : Tensor a b) -> 
+    case x of { Tensor[a, b] -> force[f] a b } 
+  ]
+}
+
+data Nat = Z[] | S[Nat]
+
+data List (a : Val) = Nil[] | Cons[a, List a]
+
+codata Pair (a : Comp) (b : Comp) where {
+  fst : a;
+  snd : b
+}
+
+codata Stream (a : Comp) where {
+  head : a;
+  tail : Stream a
+}
+
+takeS : U (forall (a : Comp). Nat -> U (Stream a) -> F (List (U a)))
+takeS = {
+  thunk[
+  \@(a : Comp) ->
+  fix[
+    \(self : U (forall (a : Comp). Nat -> U (Stream a) -> F (List (U a)))) ->
+    \(n : Nat) ->
+    \(s : U (Stream a) n -> 
+    case n of { 
+      Z -> return[Nil[]]; 
+      S[k] -> 
+        bind 
+          rest = self k thunk[ force[s].tail ]
+        in 
+          return[ Cons[ thunk[ force[s].head ], rest ] ]
+    }
+  ]
+  ]
+}
+
+codata AlephNull where { next : AlephNull }
+  
+infinity : U AlephNull
+infinity = thunk[ fix[ \(self : U AlephNull) -> cocase AlephNull of { next -> force[self] } ] ]
+
+countFrom : U (Nat -> Stream (F Nat))
+countFrom = {
+  thunk[
+  fix[
+    \(self : U (Nat -> Stream (F Nat))) ->
+    \(n : Nat) -> 
+    cocase Stream (F Nat) of { 
+      head -> return[n]; 
+      tail -> force[self] S[n]
+    }
+  ]
+  ]
+}
