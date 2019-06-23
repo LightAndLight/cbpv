@@ -88,7 +88,7 @@ prettyExp names tyNames tm =
          Bind{} -> Pretty.parens
          _ -> id)
       (prettyExp names tyNames a) <>
-      Pretty.text " in" Pretty.<$>
+      Pretty.text " in " <>
       prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) tyNames b
     Let name a b ->
       let m_ndoc = Pretty.text . Text.unpack <$> name in
@@ -98,9 +98,13 @@ prettyExp names tyNames tm =
       prettyExp names tyNames a <>
       Pretty.text " in" Pretty.<$>
       prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) tyNames b
-    Fix a ->
-      Pretty.text "fix" <>
-      Pretty.brackets (prettyExp names tyNames a)
+    Fix name t a ->
+      let m_ndoc = Pretty.text . Text.unpack <$> name in
+      Pretty.text "fix " <>
+      fromMaybe (Pretty.text "<unnamed>") m_ndoc <>
+      Pretty.text " : " <> prettyTy tyNames t <>
+      Pretty.text " in " <>
+      prettyExp (\case; 0 -> m_ndoc; n -> names (n-1)) tyNames a
     Force a ->
       Pretty.text "force" <>
       Pretty.brackets (prettyExp names tyNames a)
@@ -109,7 +113,8 @@ prettyExp names tyNames tm =
       prettyExp names tyNames a <>
       Pretty.text " of {" Pretty.<$>
       Pretty.indent 2
-        (Pretty.vsep . NonEmpty.toList $
+        (fold . intersperse (Pretty.char ';' <> Pretty.hardline) .
+         NonEmpty.toList $
          (\(Branch p e) ->
             let arity = patArity p in
             prettyPat p <>

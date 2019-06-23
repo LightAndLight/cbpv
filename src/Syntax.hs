@@ -203,7 +203,7 @@ data Exp (a :: Sort) where
   Abs :: Maybe Text -> Ty -> Exp 'C -> Exp 'C
   Bind :: Maybe Text -> Exp 'C -> Exp 'C -> Exp 'C
   Let :: Maybe Text -> Exp 'V -> Exp a -> Exp a
-  Fix :: Exp 'C -> Exp 'C
+  Fix :: Maybe Text -> Ty -> Exp 'C -> Exp 'C
   Force :: Exp 'V -> Exp 'C
   Case :: Exp 'V -> NonEmpty (Branch a) -> Exp a
   CoCase :: Ty -> NonEmpty CoBranch -> Exp 'C
@@ -225,7 +225,7 @@ abstract n = go 0
         Abs name k a -> Abs name k $ go (depth+1) a
         Bind name v a -> Bind name (go depth v) $ go (depth+1) a
         Let name v a -> Let name (go depth v) $ go (depth+1) a
-        Fix a -> Fix $ go (depth+1) a
+        Fix name t a -> Fix name t $ go (depth+1) a
         Name n'
           | n == n' -> Var depth
           | otherwise -> Name n'
@@ -263,7 +263,7 @@ abstractTyExp n = go 0
         Abs name t a -> Abs name (goTy depth t) (go depth a)
         Bind name v a -> Bind name (go depth v) (go depth a)
         Let name v a -> Let name (go depth v) (go depth a)
-        Fix a -> Fix $ go depth a
+        Fix name t a -> Fix name (goTy depth t) $ go depth a
         Name a -> Name a
         Var ix -> Var ix
         Ann a t -> Ann (go depth a) (goTy depth t)
@@ -299,7 +299,7 @@ rename f c =
     Abs n ty a -> Abs n ty (rename (rho f) a)
     Bind n a b -> Bind n (rename f a) (rename (rho f) b)
     Let n a b -> Let n (rename f a) (rename (rho f) b)
-    Fix a -> Fix $ rename (rho f) a
+    Fix n t a -> Fix n t $ rename (rho f) a
     Force a -> Force $ rename f a
     Case a bs ->
       Case (rename f a) $
@@ -329,7 +329,7 @@ renameTyExp f c =
     Abs n ty a -> Abs n (renameTy f ty) (renameTyExp f a)
     Bind n a b -> Bind n (renameTyExp f a) (renameTyExp f b)
     Let n a b -> Let n (renameTyExp f a) (renameTyExp f b)
-    Fix a -> Fix $ renameTyExp f a
+    Fix n t a -> Fix n (renameTy f t) $ renameTyExp f a
     Force a -> Force $ renameTyExp f a
     Case a bs ->
       Case (renameTyExp f a) $
@@ -361,7 +361,7 @@ subst f c =
     Abs n ty a -> Abs n ty $ subst (sigma f) a
     Bind n a b -> Bind n (subst f a) (subst (sigma f) b)
     Let n a b -> Let n (subst f a) (subst (sigma f) b)
-    Fix a -> Fix $ subst (sigma f) a
+    Fix n t a -> Fix n t $ subst (sigma f) a
     Force a -> Force $ subst f a
     Case a bs ->
       Case (subst f a) $
@@ -391,7 +391,7 @@ substTyExp f c =
     Abs n ty a -> Abs n (substTy f ty) (substTyExp f a)
     Bind n a b -> Bind n (substTyExp f a) (substTyExp f b)
     Let n a b -> Let n (substTyExp f a) (substTyExp f b)
-    Fix a -> Fix $ substTyExp f a
+    Fix n t a -> Fix n (substTy f t) $ substTyExp f a
     Force a -> Force $ substTyExp f a
     Case a bs ->
       Case (substTyExp f a) $

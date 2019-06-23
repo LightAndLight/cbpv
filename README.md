@@ -73,9 +73,8 @@ codata Stream (a : Comp) where {
 takeS : U (forall (a : Comp). Nat -> U (Stream a) -> F (List (U a)))
 takeS = {
   thunk[
-  \@(a : Comp) ->
-  fix[
-    \(self : U (forall (a : Comp). Nat -> U (Stream a) -> F (List (U a)))) ->
+    \@(a : Comp) ->
+    fix self : U (forall (a : Comp). Nat -> U (Stream a) -> F (List (U a))) in
     \(n : Nat) ->
     \(s : U (Stream a) n -> 
     case n of { 
@@ -87,25 +86,22 @@ takeS = {
           return[ Cons[ thunk[ force[s].head ], rest ] ]
     }
   ]
-  ]
 }
 
 codata AlephNull where { next : AlephNull }
   
 infinity : U AlephNull
-infinity = thunk[ fix[ \(self : U AlephNull) -> cocase AlephNull of { next -> force[self] } ] ]
+infinity = thunk[ fix self : U AlephNull in cocase AlephNull of { next -> force[self] } ]
 
 countFrom : U (Nat -> Stream (F Nat))
 countFrom = {
   thunk[
-  fix[
-    \(self : U (Nat -> Stream (F Nat))) ->
+    fix self : U (Nat -> Stream (F Nat))) in
     \(n : Nat) -> 
     cocase Stream (F Nat) of { 
       head -> return[n]; 
       tail -> force[self] S[n]
     }
-  ]
   ]
 }
 ```

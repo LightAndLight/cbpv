@@ -22,7 +22,7 @@ data Token
   | TkBackslash Text Text
   | TkVal Text Text
   | TkComp Text Text
-  | TkFix Text
+  | TkFix Text Text
   | TkLet Text Text
   | TkWhere Text Text
   | TkBind Text Text
@@ -64,7 +64,7 @@ append tk txt =
     TkVal a b -> Just $ TkVal a (b <> txt)
     TkComp a b -> Just $ TkComp a (b <> txt)
     TkSpace a -> Just $ TkSpace (a <> txt)
-    TkFix{} -> Nothing
+    TkFix a b -> Just $ TkFix a (b <> txt)
     TkLet a b -> Just $ TkLet a (b <> txt)
     TkWhere a b -> Just $ TkWhere a (b <> txt)
     TkBind a b -> Just $ TkBind a (b <> txt)
@@ -105,7 +105,7 @@ getText tk =
     TkBackslash a b -> a <> b
     TkVal a b -> a <> b
     TkComp a b -> a <> b
-    TkFix a -> a
+    TkFix a b -> a <> b
     TkLet a b -> a <> b
     TkWhere a b -> a <> b
     TkBind a b -> a <> b
@@ -175,7 +175,7 @@ token =
   TkComp <$> keyword "Comp" <*> spaces <|>
   TkNewline <$> takeWhile1 (== '\n') <*> spaces <|>
   TkSpace <$> takeWhile1 isSpace <|>
-  TkFix <$> keyword "fix" <|>
+  TkFix <$> keyword "fix" <*> spaces <|>
   TkLet <$> keyword "let" <*> spaces <|>
   TkWhere <$> keyword "where" <*> spaces <|>
   TkBind <$> keyword "bind" <*> spaces <|>

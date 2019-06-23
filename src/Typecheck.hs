@@ -279,16 +279,13 @@ infer c =
     Let _ a b -> do
       aTy <- infer a
       locally envTypes (aTy :) $ infer b
-    Fix a -> do
-      aTy <- infer a
-      case aTy of
-        TApp (TApp Arrow x) y ->
-          case x of
-            TApp U z -> do
-              unless (z == y) . throwError $ _TypeMismatch # (z, y)
-              pure z
-            _ -> throwError $ _ExpectedU # x
-        _ -> throwError $ _ExpectedArrow # aTy
+    Fix _ t a ->
+      case t of
+        TApp U t' -> do
+          aTy <- locally envTypes (t :) $ infer a
+          unless (aTy == t') . throwError $ _TypeMismatch # (t', aTy)
+          pure aTy
+        _ -> throwError $ _ExpectedU # t
     Force a -> do
       aTy <- infer a
       case aTy of
@@ -423,6 +420,26 @@ sumDecl =
       { _indCtorName = "Right"
       , _indCtorArity = 1
       , _indCtorArgs = [TVar 1]
+      }
+    ]
+  }
+
+natDecl :: IndDecl
+natDecl =
+  IndDecl
+  { _indTypeName = "Nat"
+  , _indTypeParams = []
+  , _indTypeKind = KVal
+  , _indCtors =
+    [ IndCtor
+      { _indCtorName = "Z"
+      , _indCtorArity = 0
+      , _indCtorArgs = []
+      }
+    , IndCtor
+      { _indCtorName = "S"
+      , _indCtorArity = 1
+      , _indCtorArgs = [TCtor "Nat"]
       }
     ]
   }
