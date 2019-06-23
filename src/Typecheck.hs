@@ -17,13 +17,18 @@ import Control.Monad.Except
 import Control.Monad.Reader (MonadReader, runReaderT, asks)
 import Data.Foldable (traverse_, for_)
 import Data.Map (Map)
+import Data.Maybe (fromMaybe)
 import Data.Semigroup.Foldable (foldlM1)
 import Data.Text (Text)
 import Data.Traversable (for)
+import Text.PrettyPrint.ANSI.Leijen (Doc)
 
 import qualified Data.Map as Map
+import qualified Data.Text as Text
+import qualified Text.PrettyPrint.ANSI.Leijen as Pretty
 
 import Syntax
+import Printer
 
 data ScopeError
   = InductiveNotInScope Text
@@ -32,24 +37,84 @@ data ScopeError
   | AmbiguousTyCtor Text
   | CtorNotInScope Text
   | DtorNotInScope Text
+  | VarNotInScope (Int -> Maybe Doc) Int
   | UnboundName Text
-  deriving Show
+
+prettyScopeError :: ScopeError -> Doc
+prettyScopeError se =
+  case se of
+    InductiveNotInScope a ->
+      Pretty.text "Inductive type '" <>
+      Pretty.text (Text.unpack a) <>
+      Pretty.text "' not in scope"
+    CoinductiveNotInScope a ->
+      Pretty.text "Coinductive type '" <>
+      Pretty.text (Text.unpack a) <>
+      Pretty.text "' not in scope"
+    TyCtorNotInScope a ->
+      Pretty.text "Type constructor '" <>
+      Pretty.text (Text.unpack a) <>
+      Pretty.text "' not in scope"
+    AmbiguousTyCtor a ->
+      Pretty.text "Ambiguous type constructor '" <>
+      Pretty.text (Text.unpack a) <>
+      Pretty.text "' - there is both an inductive and a coinductive type with that name"
+    CtorNotInScope a ->
+      Pretty.text "Constructor '" <>
+      Pretty.text (Text.unpack a) <>
+      Pretty.text "' not in scope"
+    DtorNotInScope a ->
+      Pretty.text "Destructor '" <>
+      Pretty.text (Text.unpack a) <>
+      Pretty.text "' not in scope"
+    VarNotInScope exNames a ->
+      Pretty.text "Variable '" <>
+      fromMaybe (Pretty.char '#' <> Pretty.int a) (exNames a) <>
+      Pretty.text "' not in scope"
+    UnboundName a ->
+      Pretty.text "Unbound name '" <>
+      Pretty.text (Text.unpack a) <>
+      Pretty.char '\''
 
 data TypeError
-  = ExpectedF Ty
-  | ExpectedU Ty
-  | ExpectedSum Ty
-  | ExpectedProd Ty
-  | ExpectedWith Ty
-  | ExpectedArrow Ty
-  | ExpectedInductive Ty
-  | ExpectedCoinductive Ty
-  | ExpectedForall Ty
-  | TypeMismatch Ty Ty
-  | NotInScope Int
+  = ExpectedF (Int -> Maybe Doc) Ty
+  | ExpectedU (Int -> Maybe Doc) Ty
+  | ExpectedArrow (Int -> Maybe Doc) Ty
+  | ExpectedInductive (Int -> Maybe Doc) Ty
+  | ExpectedCoinductive (Int -> Maybe Doc) Ty
+  | ExpectedForall (Int -> Maybe Doc) Ty
+  | TypeMismatch (Int -> Maybe Doc) Ty Ty
   | CtorExpectedArity Int Int
-  | Can'tInfer (Exp 'V)
-  deriving Show
+  | Can'tInfer (Int -> Maybe Doc) (Int -> Maybe Doc) (Exp 'V)
+
+prettyTypeError :: TypeError -> Doc
+prettyTypeError te =
+  case te of
+    ExpectedF tyNames a -> tmismatch (Pretty.text "F ?") (prettyTy tyNames a)
+    ExpectedU tyNames a -> tmismatch (Pretty.text "U ?") (prettyTy tyNames a)
+    ExpectedArrow tyNames a -> tmismatch (Pretty.text "? -> ?") (prettyTy tyNames a)
+    ExpectedInductive tyNames a -> Pretty.hsep [prettyTy tyNames a, Pretty.text "is not an inductive type"]
+    ExpectedCoinductive tyNames a -> Pretty.hsep [prettyTy tyNames a, Pretty.text "is not a coinductive type"]
+    ExpectedForall tyNames a -> tmismatch (Pretty.text "forall (? : ?). ?") (prettyTy tyNames a)
+    TypeMismatch tyNames a b -> tmismatch (prettyTy tyNames a) (prettyTy tyNames b)
+    CtorExpectedArity a b ->
+      Pretty.hsep
+      [ Pretty.text "Incorrect number of arguments to constructor: Expected"
+      , Pretty.int a
+      , Pretty.text "but got"
+      , Pretty.int b
+      ]
+    Can'tInfer exNames tyNames a ->
+      Pretty.hsep
+      [ Pretty.text "Can't infer type for"
+      , prettyExp exNames tyNames a
+      ]
+  where
+    tmismatch t1 t2 =
+      Pretty.hsep
+      [ Pretty.text "Type mismatch: Expected '" <> t1 <> Pretty.text "', but got"
+      , t2 <> Pretty.char '\''
+      ]
 
 makeClassyPrisms ''TypeError
 makeClassyPrisms ''ScopeError
@@ -130,11 +195,37 @@ data KindError
   | ExpectedVType Kind
   | ExpectedKArr Kind
   | KindMismatch Kind Kind
-  | TypeNotInScope Int
-  | TypeInductiveNotInScope Text
-  deriving (Eq, Ord, Show)
-
+  | TypeNotInScope (Int -> Maybe Doc) Int
 makeClassyPrisms ''KindError
+
+prettyKindError :: KindError -> Doc
+prettyKindError ke =
+  case ke of
+    ExpectedCType a ->
+      Pretty.hsep
+      [ Pretty.text "Kind mismatch: Expected Comp, but got"
+      , prettyKind a
+      ]
+    ExpectedVType a ->
+      Pretty.hsep
+      [ Pretty.text "Kind mismatch: Expected Val, but got"
+      , prettyKind a
+      ]
+    ExpectedKArr a ->
+      Pretty.hsep
+      [ Pretty.text "Kind mismatch: Expected ? -> ?, but got"
+      , prettyKind a
+      ]
+    KindMismatch a b ->
+      Pretty.hsep
+      [ Pretty.text "Kind mismatch: Expected"
+      , prettyKind a <> Pretty.comma
+      , Pretty.text "but got"
+      , prettyKind b
+      ]
+    TypeNotInScope tyNames n ->
+      fromMaybe (Pretty.char '#' <> Pretty.int n) (tyNames n) <>
+      Pretty.text " not in scope"
 
 ix :: Int -> [a] -> Maybe a
 ix _ [] = Nothing
@@ -187,7 +278,7 @@ inferKind ty =
     TVar n -> do
       kctx <- asks _envKinds
       case ix n kctx of
-        Nothing -> throwError $ _TypeNotInScope # n
+        Nothing -> throwError $ _TypeNotInScope # (_, n)
         Just k -> pure k
     TApp a b -> do
       aKind <- inferKind a
@@ -218,7 +309,7 @@ checkCtor name args ty =
         _CtorExpectedArity # (expectedArity, actualArity)
       let instTys = substTy (targs !!) <$> _indCtorArgs ctor
       traverse_ (uncurry check) (zip args instTys)
-    _ -> throwError $ _ExpectedInductive # ty
+    _ -> throwError $ _ExpectedInductive # (_, ty)
 
 check ::
   (AsScopeError e, AsKindError e, AsTypeError e, MonadError e m, MonadReader TCEnv m) =>
@@ -228,7 +319,7 @@ check a ty =
     Ctor n as -> checkCtor n as ty
     _ -> do
       aTy <- infer a
-      unless (aTy == ty) . throwError $ _TypeMismatch # (ty, aTy)
+      unless (aTy == ty) . throwError $ _TypeMismatch # (_, ty, aTy)
 
 checkPattern ::
   (AsScopeError e, AsKindError e, AsTypeError e, MonadError e m, MonadReader TCEnv m) =>
@@ -243,7 +334,7 @@ checkPattern (PCtor n act _) ty =
       let ex = _indCtorArity ctor
       unless (ex == act) . throwError $ _CtorExpectedArity # (ex, act)
       pure $ substTy (targs !!) <$> _indCtorArgs ctor
-    _ -> throwError $ _ExpectedInductive # ty
+    _ -> throwError $ _ExpectedInductive # (_, ty)
 
 infer ::
   (AsScopeError e, AsTypeError e, AsKindError e, MonadError e m, MonadReader TCEnv m) =>
@@ -254,7 +345,7 @@ infer c =
       aTy <- infer a
       case aTy of
         TForall _ k rest -> rest <$ checkKind t k
-        _ -> throwError $ _ExpectedForall # aTy
+        _ -> throwError $ _ExpectedForall # (_, aTy)
     AbsTy n k a ->
       TForall n k  <$> locally envKinds (k :) (infer a)
     Name n -> do
@@ -263,7 +354,7 @@ infer c =
     Var n -> do
       ctx <- asks _envTypes
       case ix n ctx of
-        Nothing -> throwError $ _NotInScope # n
+        Nothing -> throwError $ _VarNotInScope # (_, n)
         Just t -> pure t
     Thunk a -> TApp U <$> infer a
     Return a -> TApp F <$> infer a
@@ -274,7 +365,7 @@ infer c =
       aTy <- infer a
       case aTy of
         TApp F i -> locally envTypes (i :) $ infer b
-        _ -> throwError $ _ExpectedF # aTy
+        _ -> throwError $ _ExpectedF # (_, aTy)
     Let _ a b -> do
       aTy <- infer a
       locally envTypes (aTy :) $ infer b
@@ -282,14 +373,14 @@ infer c =
       case t of
         TApp U t' -> do
           aTy <- locally envTypes (t :) $ infer a
-          unless (aTy == t') . throwError $ _TypeMismatch # (t', aTy)
+          unless (aTy == t') . throwError $ _TypeMismatch # (_, t', aTy)
           pure aTy
-        _ -> throwError $ _ExpectedU # t
+        _ -> throwError $ _ExpectedU # (_, t)
     Force a -> do
       aTy <- infer a
       case aTy of
         TApp U i -> pure i
-        _ -> throwError $ _ExpectedU # aTy
+        _ -> throwError $ _ExpectedU # (_, aTy)
     Case a bs -> do
       aTy <- infer a
       ts <- for bs $ \(Branch p b) -> do
@@ -297,7 +388,7 @@ infer c =
         locally envTypes (vs <>) $ infer b
       foldlM1
         (\x y -> do
-           unless (x == y) . throwError $ _TypeMismatch # (x, y)
+           unless (x == y) . throwError $ _TypeMismatch # (_, x, y)
            pure x)
         ts
     CoCase t bs -> do
@@ -310,14 +401,14 @@ infer c =
             dtor <- lookupCoIndDtor d $ _coIndDtors decl
             check e $ substTy (targs !!) (_coIndDtorType dtor)
           pure t
-        _ -> throwError $ _ExpectedCoinductive # tc
+        _ -> throwError $ _ExpectedCoinductive # (_, tc)
     Dtor n a -> do
       (decl, dtor) <- findCoIndDtor n
       aTy <- infer a
       let
         (tc, targs) = unfoldTApp aTy
         ety = TCtor (_coIndTypeName decl)
-      unless (tc == ety) . throwError $ _TypeMismatch # (ety, tc)
+      unless (tc == ety) . throwError $ _TypeMismatch # (_, ety, tc)
       let retTy = substTy (targs !!) (_coIndDtorType dtor)
       checkKind retTy KComp
       pure retTy
@@ -325,8 +416,8 @@ infer c =
       fTy <- infer f
       case fTy of
         TApp (TApp Arrow a) b -> b <$ check x a
-        _ -> throwError $ _ExpectedArrow # fTy
-    Ctor{} -> throwError $ _Can'tInfer # c
+        _ -> throwError $ _ExpectedArrow # (_, fTy)
+    Ctor{} -> throwError $ _Can'tInfer # (_, _, c)
     Ann a b -> b <$ check a b
 
 checkIndDecl ::
@@ -388,8 +479,12 @@ data TCError
   = TCScopeError ScopeError
   | TCTypeError TypeError
   | TCKindError KindError
-  deriving Show
 makePrisms ''TCError
+
+prettyTCError :: TCError -> Doc
+prettyTCError (TCKindError a) = prettyKindError a
+prettyTCError (TCTypeError a) = prettyTypeError a
+prettyTCError (TCScopeError a) = prettyScopeError a
 
 instance AsScopeError TCError where; _ScopeError = _TCScopeError
 instance AsTypeError TCError where; _TypeError = _TCTypeError
