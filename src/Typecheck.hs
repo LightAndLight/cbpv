@@ -255,9 +255,8 @@ infer c =
       case aTy of
         TForall _ k rest -> rest <$ checkKind t k
         _ -> throwError $ _ExpectedForall # aTy
-    AbsTy n k a -> do
-      aTy <- locally envKinds (k :) $ infer a
-      pure $ TForall n k aTy
+    AbsTy n k a ->
+      TForall n k  <$> locally envKinds (k :) (infer a)
     Name n -> do
       (_, ty) <- lookupDecl n
       pure ty

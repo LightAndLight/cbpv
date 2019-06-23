@@ -275,7 +275,7 @@ abstractTyExp n = go 0
         Case a bs ->
           Case
             (go depth a)
-            ((\(Branch p e) -> Branch p $ go (depth + patArity p) e) <$> bs)
+            ((\(Branch p e) -> Branch p $ go depth e) <$> bs)
         CoCase a bs ->
           CoCase (goTy depth a) $ (\(CoBranch b c) -> CoBranch b $ go depth c) <$> bs
         AbsTy name k a -> AbsTy name k $ go (depth+1) a

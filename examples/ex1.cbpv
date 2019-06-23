@@ -53,7 +53,7 @@ takeS = {
     S[k] -> 
       bind 
         rest = force[self] @a k thunk[ force[s].tail ]
-      in 
+      in
         return[ Cons[ thunk[ force[s].head ], rest ] ]
   }
   ]
