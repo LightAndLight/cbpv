@@ -23,7 +23,7 @@ A usable type system for call by push-value:
 
 ## Examples
 
-(Doesn't parse, yet) (braces are how I ignore layout rules)
+(actual syntax) (braces are how I ignore layout rules)
 
 ```
 data Sum (a : Val) (b : Val) = Left[a] | Right[b]
@@ -70,7 +70,6 @@ codata Stream (a : Comp) where {
   tail : Stream a
 }
 
-takeS : U (forall (a : Comp). Nat -> U (Stream a) -> F (List (U a)))
 takeS = {
   thunk[
     \@(a : Comp) ->
@@ -90,10 +89,8 @@ takeS = {
 
 codata AlephNull where { next : AlephNull }
   
-infinity : U AlephNull
 infinity = thunk[ fix self : U AlephNull in cocase AlephNull of { next -> force[self] } ]
 
-countFrom : U (Nat -> Stream (F Nat))
 countFrom = {
   thunk[
     fix self : U (Nat -> Stream (F Nat))) in
