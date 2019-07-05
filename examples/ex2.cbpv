@@ -1,0 +1,18 @@
+codata Fun (a : Val) (b : Comp) where { apply[a] : b }
+codata Fun2 (a : Val) (b : Val) (c : Comp) where { apply2[a, b] : c }
+codata Fun3 (a : Val) (b : Val) (c : Val) (d : Comp) where {
+  apply3[a, b, c] : d
+}
+
+uncurry3 = {
+  \@(a : Val) ->
+  \@(b : Val) ->
+  \@(c : Val) ->
+  \@(d : Comp) ->
+  thunk[
+    \(f : Fun a (Fun b (Fun c d))) ->
+    cocase Fun3 a b c d of {
+      apply3[x : a, y : b, z : c] -> f.apply[x].apply[y].apply[z]
+    }
+  ]
+}
