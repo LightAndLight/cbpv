@@ -232,9 +232,14 @@ ix _ [] = Nothing
 ix 0 (x:_) = Just x
 ix n (_:xs) = ix (n-1) xs
 
+namesDoc :: (Int -> Maybe Text) -> Int -> Maybe Doc
+namesDoc f = fmap (Pretty.text . Text.unpack) . f
+
 data TCEnv
   = TCEnv
-  { _envTypes :: [Ty]
+  { _envVarNames :: Int -> Maybe Text
+  , _envTypes :: [Ty]
+  , _envTyNames :: Int -> Maybe Text
   , _envKinds :: [Kind]
   , _envDecls :: Map Text (Exp 'V, Ty)
   , _envIndDecls :: [IndDecl]
@@ -243,7 +248,16 @@ data TCEnv
 makeLenses ''TCEnv
 
 emptyTCEnv :: TCEnv
-emptyTCEnv = TCEnv mempty mempty mempty mempty mempty
+emptyTCEnv =
+  TCEnv
+  { _envVarNames = const Nothing
+  , _envTypes = mempty
+  , _envTyNames = const Nothing
+  , _envKinds = mempty
+  , _envDecls = mempty
+  , _envIndDecls = mempty
+  , _envCoIndDecls = mempty
+  }
 
 lookupDecl :: (MonadReader TCEnv m, AsScopeError e, MonadError e m) => Text -> m (Exp 'V, Ty)
 lookupDecl n = do
@@ -261,7 +275,10 @@ inferKind ::
 inferKind ty =
   case ty of
     TName a -> throwError $ _UnboundName # a
-    TForall _ k a -> locally envKinds (k :) $ inferKind a
+    TForall name k a ->
+      locally envKinds (k :) .
+      locally envTyNames (\f -> \case; 0 -> name; n -> f (n-1)) $
+      inferKind a
     U -> pure $ KArr KComp KVal
     TCtor n -> do
       mind <-
@@ -278,7 +295,9 @@ inferKind ty =
     TVar n -> do
       kctx <- asks _envKinds
       case ix n kctx of
-        Nothing -> throwError $ _TypeNotInScope # (_, n)
+        Nothing -> do
+          tyNames <- asks (namesDoc . _envTyNames)
+          throwError $ _TypeNotInScope # (tyNames, n)
         Just k -> pure k
     TApp a b -> do
       aKind <- inferKind a
@@ -309,7 +328,9 @@ checkCtor name args ty =
         _CtorExpectedArity # (expectedArity, actualArity)
       let instTys = substTy (targs !!) <$> _indCtorArgs ctor
       traverse_ (uncurry check) (zip args instTys)
-    _ -> throwError $ _ExpectedInductive # (_, ty)
+    _ -> do
+      varNames <- asks (namesDoc . _envVarNames)
+      throwError $ _ExpectedInductive # (varNames, ty)
 
 check ::
   (AsScopeError e, AsKindError e, AsTypeError e, MonadError e m, MonadReader TCEnv m) =>
@@ -319,7 +340,8 @@ check a ty =
     Ctor n as -> checkCtor n as ty
     _ -> do
       aTy <- infer a
-      unless (aTy == ty) . throwError $ _TypeMismatch # (_, ty, aTy)
+      tyNames <- asks (namesDoc . _envTyNames)
+      unless (aTy == ty) . throwError $ _TypeMismatch # (tyNames, ty, aTy)
 
 checkPattern ::
   (AsScopeError e, AsKindError e, AsTypeError e, MonadError e m, MonadReader TCEnv m) =>
@@ -334,7 +356,9 @@ checkPattern (PCtor n act _) ty =
       let ex = _indCtorArity ctor
       unless (ex == act) . throwError $ _CtorExpectedArity # (ex, act)
       pure $ substTy (targs !!) <$> _indCtorArgs ctor
-    _ -> throwError $ _ExpectedInductive # (_, ty)
+    _ -> do
+      tyNames <- asks (namesDoc . _envTyNames)
+      throwError $ _ExpectedInductive # (tyNames, ty)
 
 infer ::
   (AsScopeError e, AsTypeError e, AsKindError e, MonadError e m, MonadReader TCEnv m) =>
@@ -345,7 +369,9 @@ infer c =
       aTy <- infer a
       case aTy of
         TForall _ k rest -> rest <$ checkKind t k
-        _ -> throwError $ _ExpectedForall # (_, aTy)
+        _ -> do
+          tyNames <- asks (namesDoc . _envTyNames)
+          throwError $ _ExpectedForall # (tyNames, aTy)
     AbsTy n k a ->
       TForall n k  <$> locally envKinds (k :) (infer a)
     Name n -> do
@@ -354,7 +380,9 @@ infer c =
     Var n -> do
       ctx <- asks _envTypes
       case ix n ctx of
-        Nothing -> throwError $ _VarNotInScope # (_, n)
+        Nothing -> do
+          varNames <- asks (namesDoc . _envVarNames)
+          throwError $ _VarNotInScope # (varNames, n)
         Just t -> pure t
     Thunk a -> TApp U <$> infer a
     Return a -> TApp F <$> infer a
@@ -365,7 +393,9 @@ infer c =
       aTy <- infer a
       case aTy of
         TApp F i -> locally envTypes (i :) $ infer b
-        _ -> throwError $ _ExpectedF # (_, aTy)
+        _ -> do
+          tyNames <- asks (namesDoc . _envTyNames)
+          throwError $ _ExpectedF # (tyNames, aTy)
     Let _ a b -> do
       aTy <- infer a
       locally envTypes (aTy :) $ infer b
@@ -373,14 +403,20 @@ infer c =
       case t of
         TApp U t' -> do
           aTy <- locally envTypes (t :) $ infer a
-          unless (aTy == t') . throwError $ _TypeMismatch # (_, t', aTy)
+          unless (aTy == t') $ do
+            tyNames <- asks (namesDoc . _envTyNames)
+            throwError $ _TypeMismatch # (tyNames, t', aTy)
           pure aTy
-        _ -> throwError $ _ExpectedU # (_, t)
+        _ -> do
+          tyNames <- asks (namesDoc . _envTyNames)
+          throwError $ _ExpectedU # (tyNames, t)
     Force a -> do
       aTy <- infer a
       case aTy of
         TApp U i -> pure i
-        _ -> throwError $ _ExpectedU # (_, aTy)
+        _ -> do
+          tyNames <- asks (namesDoc . _envTyNames)
+          throwError $ _ExpectedU # (tyNames, aTy)
     Case a bs -> do
       aTy <- infer a
       ts <- for bs $ \(Branch p b) -> do
@@ -388,7 +424,9 @@ infer c =
         locally envTypes (vs <>) $ infer b
       foldlM1
         (\x y -> do
-           unless (x == y) . throwError $ _TypeMismatch # (_, x, y)
+           unless (x == y) $ do
+             tyNames <- asks (namesDoc . _envTyNames)
+             throwError $ _TypeMismatch # (tyNames, x, y)
            pure x)
         ts
     CoCase t bs -> do
@@ -401,14 +439,18 @@ infer c =
             dtor <- lookupCoIndDtor d $ _coIndDtors decl
             check e $ substTy (targs !!) (_coIndDtorType dtor)
           pure t
-        _ -> throwError $ _ExpectedCoinductive # (_, tc)
+        _ -> do
+          tyNames <- asks (namesDoc . _envTyNames)
+          throwError $ _ExpectedCoinductive # (tyNames, tc)
     Dtor n a -> do
       (decl, dtor) <- findCoIndDtor n
       aTy <- infer a
       let
         (tc, targs) = unfoldTApp aTy
         ety = TCtor (_coIndTypeName decl)
-      unless (tc == ety) . throwError $ _TypeMismatch # (_, ety, tc)
+      unless (tc == ety) $ do
+        tyNames <- asks (namesDoc . _envTyNames)
+        throwError $ _TypeMismatch # (tyNames, ety, tc)
       let retTy = substTy (targs !!) (_coIndDtorType dtor)
       checkKind retTy KComp
       pure retTy
@@ -416,8 +458,13 @@ infer c =
       fTy <- infer f
       case fTy of
         TApp (TApp Arrow a) b -> b <$ check x a
-        _ -> throwError $ _ExpectedArrow # (_, fTy)
-    Ctor{} -> throwError $ _Can'tInfer # (_, _, c)
+        _ -> do
+          tyNames <- asks (namesDoc . _envTyNames)
+          throwError $ _ExpectedArrow # (tyNames, fTy)
+    Ctor{} -> do
+      varNames <- asks (namesDoc . _envVarNames)
+      tyNames <- asks (namesDoc . _envTyNames)
+      throwError $ _Can'tInfer # (varNames, tyNames, c)
     Ann a b -> b <$ check a b
 
 checkIndDecl ::

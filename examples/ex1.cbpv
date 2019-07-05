@@ -44,8 +44,8 @@ codata Stream (a : Comp) where {
 
 takeS = {
   thunk[
-  \@(a : Comp) ->
   fix self : U (forall (a : Comp). Nat -> U (Stream a) -> F (List (U a))) in
+  \@(a : Comp) ->
   \(n : Nat) ->
   \(s : U (Stream a)) ->
   case n of {

@@ -25,6 +25,6 @@ run = do
 
     handleTypecheckError :: Either TCError a -> IO a
     handleTypecheckError (Left e) = do
-      putStrLn $ "Typecheck error: " <> show e
+      putStrLn $ "Typecheck error: " <> show (prettyTCError e)
       exitFailure
     handleTypecheckError (Right a) = pure a
