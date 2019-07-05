@@ -33,13 +33,13 @@ data Nat = Z[] | S[Nat]
 data List (a : Val) = Nil[] | Cons[a, List a]
 
 codata Pair (a : Comp) (b : Comp) where {
-  fst : a;
-  snd : b
+  fst[] : a;
+  snd[] : b
 }
 
 codata Stream (a : Comp) where {
-  head : a;
-  tail : Stream a
+  head[] : a;
+  tail[] : Stream a
 }
 
 takeS = {
@@ -52,27 +52,24 @@ takeS = {
     Z[] -> return[Nil[] : List (U a)]; 
     S[k] -> 
       bind 
-        rest = force[self] @a k thunk[ force[s].tail ]
+        rest = force[self] @a k thunk[ force[s].tail[] ]
       in
-        return[ Cons[ thunk[ force[s].head ], rest ] : List (U a) ]
+        return[ Cons[ thunk[ force[s].head[] ], rest ] : List (U a) ]
   }
   ]
 }
 
-codata AlephNull where { next : AlephNull }
+codata AlephNull where { next[] : AlephNull }
   
-infinity = thunk[ fix self : U AlephNull in cocase AlephNull of { next -> force[self] } ] ]
+infinity = thunk[ fix self : U AlephNull in cocase AlephNull of { next[] -> force[self] } ]
 
-countFrom : U (Nat -> Stream (F Nat))
 countFrom = {
   thunk[
-  fix[
-    \(self : U (Nat -> Stream (F Nat))) ->
+  fix self : U (Nat -> Stream (F Nat)) in
     \(n : Nat) -> 
     cocase Stream (F Nat) of { 
-      head -> return[n]; 
-      tail -> force[self] S[n]
+      head[] -> return[n]; 
+      tail[] -> force[self] S[n]
     }
-  ]
   ]
 }

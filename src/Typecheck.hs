@@ -366,17 +366,17 @@ check a ty =
 
 checkPattern ::
   (AsScopeError e, AsKindError e, AsTypeError e, MonadError e m, MonadReader TCEnv m) =>
-  Pattern -> Ty -> m [Ty]
-checkPattern PWild _ = pure []
-checkPattern (PVar _) ty = pure [ty]
-checkPattern (PCtor n act _) ty =
+  Pattern -> Ty -> m ([Maybe Text], [Ty])
+checkPattern PWild _ = pure ([], [])
+checkPattern (PVar n) ty = pure ([n], [ty])
+checkPattern (PCtor n act ns) ty =
   case unfoldTApp ty of
     (TCtor nty, targs) -> do
       decl <- lookupIndDecl nty
       ctor <- lookupIndCtor n $ _indCtors decl
       let ex = _indCtorArity ctor
       unless (ex == act) . throwError $ _CtorExpectedArity # (ex, act)
-      pure $ substTy (targs !!) <$> _indCtorArgs ctor
+      pure (ns, substTy (targs !!) <$> _indCtorArgs ctor)
     _ -> do
       tyNames <- asks (namesDoc . _envTyNames)
       throwError $ _ExpectedInductive # (tyNames, ty)
@@ -455,8 +455,11 @@ infer c =
     Case a bs -> do
       aTy <- infer a
       ts <- for bs $ \(Branch p b) -> do
-        vs <- checkPattern p aTy
-        locally envTypes (vs <>) $ infer b
+        (ns, vs) <- checkPattern p aTy
+        let arity = patArity p
+        locally envTypes (vs <>) .
+          locally envVarNames (\f n -> if n < arity then ns !! n else f (n-arity)) $
+          infer b
       foldlM1
         (\x y -> do
            unless (x == y) $ do
@@ -468,16 +471,18 @@ infer c =
       checkKind t KComp
       let (tc, targs) = unfoldTApp t
       case tc of
-        TCtor n -> do
-          decl <- lookupCoIndDecl n
-          for_ bs $ \(CoBranch d e) -> do
+        TCtor name -> do
+          decl <- lookupCoIndDecl name
+          for_ bs $ \(CoBranch d arity tys names e) -> do
             dtor <- lookupCoIndDtor d $ _coIndDtors decl
-            check e $ substTy (targs !!) (_coIndDtorType dtor)
+            locally envTypes (tys ++) .
+              locally envVarNames (\f n -> if n < arity then Just (names !! n) else f (n-arity)) .
+              check e $ substTy (targs !!) (_coIndDtorType dtor)
           pure t
         _ -> do
           tyNames <- asks (namesDoc . _envTyNames)
           throwError $ _ExpectedCoinductive # (tyNames, tc)
-    Dtor n a -> do
+    Dtor n bs a -> do
       (decl, dtor) <- findCoIndDtor n
       aTy <- infer a
       let
@@ -486,9 +491,9 @@ infer c =
       unless (tc == ety) $ do
         tyNames <- asks (namesDoc . _envTyNames)
         throwError $ _TypeMismatch # (tyNames, ety, tc)
+      for_ (zip bs $ _coIndDtorArgs dtor) (uncurry check)
       let retTy = substTy (targs !!) (_coIndDtorType dtor)
-      checkKind retTy KComp
-      pure retTy
+      retTy <$ checkKind retTy KComp
     App f x -> do
       fTy <- infer f
       case fTy of
@@ -539,7 +544,7 @@ checkDecl ::
   Decl -> m (Text, Exp 'V, Ty)
 checkDecl (Decl n e) = do
   ty <- infer e
-  pure (n, e, ty)
+  (n, e, ty) <$ checkKind ty KVal
 
 checkModule ::
   ( MonadReader TCEnv m
@@ -647,10 +652,14 @@ streamDecl =
   , _coIndDtors =
     [ CoIndDtor
       { _coIndDtorName = "head"
+      , _coIndDtorArity = 0
+      , _coIndDtorArgs = []
       , _coIndDtorType = TVar 0
       }
     , CoIndDtor
       { _coIndDtorName = "tail"
+      , _coIndDtorArity = 0
+      , _coIndDtorArgs = []
       , _coIndDtorType = TApp (TCtor "Stream") (TVar 0)
       }
     ]

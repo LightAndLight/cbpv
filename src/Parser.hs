@@ -3,23 +3,21 @@
 {-# language FlexibleInstances, MultiParamTypeClasses #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language LambdaCase #-}
-{-# language MultiWayIf, RecordWildCards#-}
 {-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language RankNTypes #-}
 {-# language TypeFamilies #-}
 module Parser where
 
-import Control.Applicative (Alternative, (<|>), many, optional)
+import Control.Applicative (Alternative, (<|>), many, some, optional)
 import Control.Lens.Setter (over, mapped)
 import Data.ByteString (ByteString)
 import Data.Char (isSpace)
 import Data.List.NonEmpty (NonEmpty(..))
-import Data.Maybe (fromMaybe)
 import Data.String (fromString)
 import Data.Text (Text)
-import Text.Parser.Combinators (Parsing, (<?>), sepBy, sepBy1, skipMany)
-import Text.Parser.Char (CharParsing, alphaNum, lower, upper, satisfy)
+import Text.Parser.Combinators (Parsing, (<?>), eof, sepBy, sepBy1, skipMany)
+import Text.Parser.Char (CharParsing, alphaNum, lower, upper, newline, satisfy)
 import Text.Parser.Token (TokenParsing, IdentifierStyle(..), Unlined(..))
 import Text.Trifecta.Delta (Delta(..))
 import Text.Trifecta.Parser (runParser)
@@ -119,7 +117,7 @@ pattern_ :: (Monad m, TokenParsing m) => m (Pattern, [Text])
 pattern_ =
   (PWild, []) <$ Token.symbolic '_' <|>
   (\a -> (PVar $ Just a, [a])) <$> ident <|>
-  (\a bs -> (PCtor a (length bs) bs, bs)) <$>
+  (\a bs -> (PCtor a (length bs) (Just <$> bs), bs)) <$>
     ctor <*>
     Token.brackets (ident `sepBy` Token.comma)
 
@@ -131,9 +129,16 @@ branch ex =
 
 cobranch :: (Monad m, TokenParsing m) => m CoBranch
 cobranch =
-  CoBranch <$>
-  ident <* arrow <*>
+  (\n as e ->
+     let (ns, ts) = unzip as in
+     CoBranch n (length as) ts ns $ foldr abstract e ns) <$>
+  ident <*>
+  Token.brackets
+    (sepBy ((,) <$> ident <* Token.colon <*> ty) Token.comma) <* arrow <*>
   computation
+
+braces :: TokenParsing m => Nesting m a -> m a
+braces m = runNesting (Token.symbolic '{' *> m) <* Token.symbolic '}'
 
 mkCase ::
   (Monad m, TokenParsing m) =>
@@ -142,11 +147,7 @@ mkCase ::
 mkCase ex =
   Case <$ keyword "case" <*>
   value <* keyword "of" <*>
-  runNesting
-    (Token.braces $
-     (:|) <$>
-     branch ex <*>
-     many (Token.semi *> branch ex))
+  braces ((:|) <$> branch ex <*> many (Token.semi *> branch ex))
 
 mkLet ::
   (Monad m, TokenParsing m) =>
@@ -170,9 +171,9 @@ computation =
   (lam <|> ann <|> case_ <|> cocase <|> let_ <|> fix <|> bind) <?> "computation"
   where
     lam =
-      (either
-         (\(a, b) -> Abs (Just a) b . abstract a)
-         (\(a, b) -> AbsTy (Just a) b . abstractTyExp a)) <$ Token.symbolic '\\' <*>
+      either
+        (\(a, b) -> Abs (Just a) b . abstract a)
+        (\(a, b) -> AbsTy (Just a) b . abstractTyExp a) <$ Token.symbolic '\\' <*>
       (Left <$> Token.parens ((,) <$> ident <* Token.colon <*> ty) <|>
        Right <$ Token.symbolic '@' <*>
        Token.parens ((,) <$> ident <* Token.colon <*> kind)) <* arrow <*>
@@ -197,7 +198,7 @@ computation =
     cocase =
       CoCase <$ keyword "cocase" <*>
       ty <* keyword "of" <*>
-      runNesting (Token.braces $ (:|) <$> cobranch <*> many (Token.semi *> cobranch))
+      braces ((:|) <$> cobranch <*> many (Token.semi *> cobranch))
 
     ann = mkAnn app
 
@@ -207,7 +208,9 @@ computation =
       many (Left <$> value <|> Right <$ Token.symbolic '@' <*> tyAtom)
 
     dtor =
-      foldl (\a b -> Dtor b a) <$> atom <*> many (Token.dot *> ident)
+      foldl (\a (b, c) -> Dtor b c a) <$>
+      atom <*>
+      many ((,) <$ Token.dot <*> ident <*> Token.brackets (sepBy value Token.comma))
 
     atom =
       Return <$ keyword "return" <*> Token.brackets value <|>
@@ -253,27 +256,34 @@ coIndDecl =
      maybe [] (over (mapped.coIndDtorType) (abstractTys pns)) mdtors) <$ keyword "codata" <*>
   ctor <*>
   many (Token.parens $ (,) <$> ident <* Token.colon <*> kind) <*>
-  optional (keyword "where" *> runNesting (Token.braces $ sepBy1 dtorDecl Token.semi))
+  optional
+    (keyword "where" *> braces (sepBy1 dtorDecl Token.semi))
   where
-    dtorDecl = CoIndDtor <$> ident <* Token.colon <*> ty
+    dtorDecl =
+      (\n as -> CoIndDtor n (length as) as) <$>
+      ident <*>
+      Token.brackets (sepBy ty Token.comma) <* Token.colon <*>
+      ty
 
 decl :: (Monad m, TokenParsing m) => m Decl
 decl =
   Decl <$>
   ident <* Token.symbolic '=' <*>
-  (runNesting (Token.braces value) <|> value)
+  (runNesting (Token.symbolic '{' *> value) <* Token.symbolic '}' <|>
+   value)
 
 module_ :: (Monad m, TokenParsing m) => m Module
 module_ =
-  MDecl <$> runUnlined decl <*> rest <|>
-  MIndDecl <$> runUnlined indDecl <*> rest <|>
-  MCoIndDecl <$> runUnlined coIndDecl <*> rest <|>
-  pure MEmpty
-  where
-    rest = fromMaybe MEmpty <$> optional (Token.whiteSpace *> module_)
+  runUnlined $
+  foldr (either (either MDecl MIndDecl) MCoIndDecl) MEmpty <$>
+  sepBy
+    (Left . Left <$> decl <|>
+     Left . Right <$> indDecl <|>
+     Right <$> coIndDecl)
+    (some $ newline <|> Token.whiteSpace *> newline)
 
 parse ::
   String ->
   (forall m. (Monad m, TokenParsing m) => m a) ->
   ByteString -> Result a
-parse s m = runParser m (Directed (fromString s) 0 0 0 0)
+parse s m = runParser (m <* eof) (Directed (fromString s) 0 0 0 0)

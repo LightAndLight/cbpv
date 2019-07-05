@@ -127,7 +127,7 @@ prettyExp names tyNames tm =
               tyNames
               e) <$> bs) Pretty.<$>
       Pretty.char '}'
-    Dtor a b ->
+    Dtor a args b ->
       (case b of
          App{} -> Pretty.parens
          Abs{} -> Pretty.parens
@@ -138,17 +138,35 @@ prettyExp names tyNames tm =
          _ -> id)
       (prettyExp names tyNames b) <>
       Pretty.dot <>
-      Pretty.text (Text.unpack a)
+      Pretty.text (Text.unpack a) <>
+      Pretty.brackets
+        (fold . intersperse (Pretty.text ", ") $
+         prettyExp names tyNames <$> args)
     CoCase a bs ->
       Pretty.text "cocase " <>
       prettyTy tyNames a <>
       Pretty.text " of {" Pretty.<$>
       Pretty.indent 2
         (Pretty.vsep . NonEmpty.toList $
-         (\(CoBranch d e) ->
+         (\(CoBranch d arity tys names' e) ->
             Pretty.text (Text.unpack d) <>
+            Pretty.brackets
+              (fold . intersperse (Pretty.text ", ") $
+               (\(n, t) ->
+                  Pretty.hsep
+                  [ Pretty.text $ Text.unpack n
+                  , Pretty.char ':'
+                  , prettyTy names t
+                  ]) <$>
+                zip names' tys) <>
             Pretty.text " -> " <>
-            prettyExp names tyNames e) <$>
+            prettyExp
+              (\n ->
+                 if n < arity
+                 then Just . Pretty.text . Text.unpack $ names' !! n
+                 else names (n-arity))
+              tyNames
+              e) <$>
           bs) Pretty.<$>
       Pretty.char '}'
     App a b ->

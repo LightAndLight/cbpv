@@ -12,6 +12,7 @@ import Control.Lens.TH (makeLenses)
 import Data.Bifunctor (first)
 import Data.List (iterate)
 import Data.List.NonEmpty (NonEmpty(..))
+import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import Data.Text (Text)
 
@@ -61,6 +62,8 @@ data CoIndDecl
 data CoIndDtor
   = CoIndDtor
   { _coIndDtorName :: !Text
+  , _coIndDtorArity :: !Int
+  , _coIndDtorArgs :: [Ty]
   , _coIndDtorType :: Ty
   } deriving Show
 
@@ -168,7 +171,7 @@ substTy f t =
 data Pattern
   = PWild
   | PVar (Maybe Text)
-  | PCtor !Text !Int [Text]
+  | PCtor !Text !Int [Maybe Text]
   deriving (Eq, Show)
 
 patArity :: Pattern -> Int
@@ -179,13 +182,12 @@ patArity (PCtor _ n _) = n
 patNames :: Pattern -> [Text]
 patNames PWild = ["_"]
 patNames (PVar n) = maybe ["<unnamed>"] pure n
-patNames (PCtor _ arity ns) =
-  take arity $ ns <> repeat "<unnamed>"
+patNames (PCtor _ _ ns) = fromMaybe "<unnamed>" <$> ns
 
 data Branch a = Branch Pattern (Exp a)
   deriving Show
 
-data CoBranch = CoBranch Text (Exp 'C)
+data CoBranch = CoBranch !Text !Int [Ty] [Text] (Exp 'C)
   deriving Show
 
 data Exp (a :: Sort) where
@@ -207,7 +209,7 @@ data Exp (a :: Sort) where
   Force :: Exp 'V -> Exp 'C
   Case :: Exp 'V -> NonEmpty (Branch a) -> Exp a
   CoCase :: Ty -> NonEmpty CoBranch -> Exp 'C
-  Dtor :: Text -> Exp 'C -> Exp 'C
+  Dtor :: Text -> [Exp 'V] -> Exp 'C -> Exp 'C
   App :: Exp 'C -> Exp 'V -> Exp 'C
 
   Name :: Text -> Exp 'V
@@ -235,13 +237,15 @@ abstract n = go 0
         Force a -> Force $ go depth a
         Return a -> Return $ go depth a
         Ctor a b -> Ctor a $ go depth <$> b
-        Dtor a b -> Dtor a $ go depth b
+        Dtor a b c -> Dtor a (go depth <$> b) (go depth c)
         Case a bs ->
           Case
             (go depth a)
             ((\(Branch p e) -> Branch p $ go (depth + patArity p) e) <$> bs)
         CoCase a bs ->
-          CoCase a $ (\(CoBranch b c) -> CoBranch b $ go depth c) <$> bs
+          CoCase a $
+          (\(CoBranch b arity tys names d) -> CoBranch b arity tys names $ go (depth+arity) d) <$>
+          bs
         AbsTy name k a -> AbsTy name k $ go depth a
         AppTy a t -> AppTy (go depth a) t
 
@@ -271,13 +275,16 @@ abstractTyExp n = go 0
         Force a -> Force $ go depth a
         Return a -> Return $ go depth a
         Ctor a b -> Ctor a $ go depth <$> b
-        Dtor a b -> Dtor a $ go depth b
+        Dtor a b c -> Dtor a (go depth <$> b) (go depth c)
         Case a bs ->
           Case
             (go depth a)
             ((\(Branch p e) -> Branch p $ go depth e) <$> bs)
         CoCase a bs ->
-          CoCase (goTy depth a) $ (\(CoBranch b c) -> CoBranch b $ go depth c) <$> bs
+          CoCase
+            (goTy depth a)
+            ((\(CoBranch b c tys d e) ->
+                CoBranch b c (goTy depth <$> tys) d $ go depth e) <$> bs)
         AbsTy name k a -> AbsTy name k $ go (depth+1) a
         AppTy a t -> AppTy (go depth a) (goTy depth t)
 
@@ -307,9 +314,10 @@ rename f c =
         (\(Branch p e) ->
            Branch p $ rename (iterate rho f !! patArity p) e)
         bs
-    Dtor a b -> Dtor a $ rename f b
+    Dtor a b d -> Dtor a (rename f <$> b) (rename f d)
     CoCase a bs ->
-      CoCase a $ (\(CoBranch b e) -> CoBranch b $ rename f e) <$> bs
+      CoCase a $
+      (\(CoBranch b arity tys names e) -> CoBranch b arity tys names $ rename (iterate rho f !! arity) e) <$> bs
     App a b -> App (rename f a) (rename f b)
 
     AbsTy n k a -> AbsTy n k $ rename f a
@@ -334,10 +342,11 @@ renameTyExp f c =
     Case a bs ->
       Case (renameTyExp f a) $
       (\(Branch p e) -> Branch p $ renameTyExp f e) <$> bs
-    Dtor n b -> Dtor n $ renameTyExp f b
+    Dtor n b d -> Dtor n (renameTyExp f <$> b) (renameTyExp f d)
     CoCase t bs ->
       CoCase (renameTy f t) $
-      (\(CoBranch b e) -> CoBranch b $ renameTyExp f e) <$> bs
+      (\(CoBranch b arity tys names e) ->
+         CoBranch b arity (renameTy f <$> tys)names $ renameTyExp f e) <$> bs
     App a b -> App (renameTyExp f a) (renameTyExp f b)
 
     AbsTy n k a -> AbsTy n k $ renameTyExp (rho f) a
@@ -369,9 +378,11 @@ subst f c =
         (\(Branch p e) ->
            Branch p $ subst (iterate sigma f !! patArity p) e)
         bs
-    Dtor a b -> Dtor a $ subst f b
+    Dtor a b d -> Dtor a (subst f <$> b) (subst f d)
     CoCase a bs ->
-      CoCase a $ (\(CoBranch b e) -> CoBranch b $ subst f e) <$> bs
+      CoCase a $
+      (\(CoBranch b arity tys names e) ->
+         CoBranch b arity tys names $ subst (iterate sigma f !! arity) e) <$> bs
     App a b -> App (subst f a) (subst f b)
 
     AbsTy n k a -> AbsTy n k $ subst f a
@@ -396,10 +407,11 @@ substTyExp f c =
     Case a bs ->
       Case (substTyExp f a) $
       (\(Branch p e) -> Branch p $ substTyExp f e) <$> bs
-    Dtor n b -> Dtor n $ substTyExp f b
+    Dtor n b d -> Dtor n (substTyExp f <$> b) (substTyExp f d)
     CoCase t bs ->
       CoCase (substTy f t) $
-      (\(CoBranch b e) -> CoBranch b $ substTyExp f e) <$> bs
+      (\(CoBranch b arity tys names e) ->
+         CoBranch b arity (substTy f <$> tys) names $ substTyExp f e) <$> bs
     App a b -> App (substTyExp f a) (substTyExp f b)
 
     AbsTy n k a -> AbsTy n k $ substTyExp (sigmaTy f) a

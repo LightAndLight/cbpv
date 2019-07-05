@@ -29,13 +29,16 @@ findBranch n args (b :| bs) = go (b : bs)
             else error "stuck: findBranch"
           else go xs
 
-findCoBranch :: Text -> NonEmpty CoBranch -> Exp 'C
-findCoBranch n (b :| bs) = go (b:bs)
+findCoBranch :: Text -> [Exp 'V] -> NonEmpty CoBranch -> Exp 'C
+findCoBranch n args (b :| bs) = go (b:bs)
   where
     go [] = error "stuck: incomplete copattern match"
-    go (CoBranch n' e : cs) =
+    go (CoBranch n' arity _ _ e : cs) =
       if n == n'
-      then e
+      then
+        if arity == length args
+        then subst (args !!) e
+        else error "stuck: findCoBranch"
       else go cs
 
 eval :: Exp 'C -> Terminal
@@ -60,9 +63,9 @@ eval c =
     Case (Ctor n as) bs -> eval $ findBranch n as bs
     Case{} -> error "stuck: case"
     CoCase _ bs -> TCoCase bs
-    Dtor n a ->
-      case eval a of
-        TCoCase bs -> eval $ findCoBranch n bs
+    Dtor n as b ->
+      case eval b of
+        TCoCase bs -> eval $ findCoBranch n as bs
         _ -> error "stuck: dtor"
     App a b ->
       case eval a of
