@@ -1,4 +1,4 @@
-data Sum (a : Val) (b : Val) = Left[a] | Right[b]
+data Sum (a : Val) (b : Val) where { Left[a]; Right[b] }
 
 sumElim = {
   thunk[ 
@@ -15,7 +15,7 @@ sumElim = {
   ]
 }
 
-data Tensor (a : Val) (b : Val) = Tensor[a, b]
+data Tensor (a : Val) (b : Val) where { Tensor[a, b] }
 
 tensorElim = {
   thunk[ 
@@ -28,9 +28,9 @@ tensorElim = {
   ]
 }
 
-data Nat = Z[] | S[Nat]
+data Nat where { Z[]; S[Nat] }
 
-data List (a : Val) = Nil[] | Cons[a, List a]
+data List (a : Val) where { Nil[]; Cons[a, List a] }
 
 codata Pair (a : Comp) (b : Comp) where {
   fst[] : a;

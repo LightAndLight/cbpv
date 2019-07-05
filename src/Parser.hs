@@ -241,7 +241,8 @@ indDecl =
      maybe [] (over (mapped.indCtorArgs.mapped) (abstractTys pns)) mctors) <$ keyword "data" <*>
   ctor <*>
   many (Token.parens $ (,) <$> ident <* Token.colon <*> kind) <*>
-  optional (Token.symbolic '=' *> sepBy1 ctorDecl (Token.symbolic '|'))
+  optional
+    (keyword "where" *> braces (sepBy1 ctorDecl Token.semi))
   where
     ctorDecl =
       (\n ps -> IndCtor n (length ps) ps) <$>
