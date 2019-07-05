@@ -54,7 +54,7 @@ takeS = {
       bind 
         rest = force[self] @a k thunk[ force[s].tail ]
       in
-        return[ Cons[ thunk[ force[s].head ], rest ] ]
+        return[ Cons[ thunk[ force[s].head ], rest ] : List (U a) ]
   }
   ]
 }

@@ -99,6 +99,12 @@ kind = foldr KArr <$> atom <*> many (arrow *> atom)
       KComp <$ comp <|>
       Token.parens kind
 
+tyAtom :: (Monad m, TokenParsing m) => m Ty
+tyAtom =
+  (\case; "U" -> U; "F" -> F; c -> TCtor c) <$> ctor <|>
+  TName <$> ident <|>
+  Token.parens (Arrow <$ arrow <|> ty)
+
 ty :: (Monad m, TokenParsing m) => m Ty
 ty = (fa <|> arr) <?> "type"
   where
@@ -107,11 +113,7 @@ ty = (fa <|> arr) <?> "type"
       Token.parens ((,) <$> ident <* Token.colon <*> kind) <* Token.dot <*>
       ty
     arr = (\a -> maybe a (TApp $ TApp Arrow a)) <$> app <*> optional (arrow *> arr)
-    app = foldl TApp <$> atom <*> many atom
-    atom =
-      (\case; "U" -> U; "F" -> F; c -> TCtor c) <$> ctor <|>
-      TName <$> ident <|>
-      Token.parens (Arrow <$ arrow <|> ty)
+    app = foldl TApp <$> tyAtom <*> many tyAtom
 
 pattern_ :: (Monad m, TokenParsing m) => m (Pattern, [Text])
 pattern_ =
@@ -202,7 +204,7 @@ computation =
     app =
       foldl (\b -> either (App b) (AppTy b)) <$>
       dtor <*>
-      many (Left <$> value <|> Right <$ Token.symbolic '@' <*> ty)
+      many (Left <$> value <|> Right <$ Token.symbolic '@' <*> tyAtom)
 
     dtor =
       foldl (\a b -> Dtor b a) <$> atom <*> many (Token.dot *> ident)

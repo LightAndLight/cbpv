@@ -90,13 +90,20 @@ data TypeError
 prettyTypeError :: TypeError -> Doc
 prettyTypeError te =
   case te of
-    ExpectedF tyNames a -> tmismatch (Pretty.text "F ?") (prettyTy tyNames a)
-    ExpectedU tyNames a -> tmismatch (Pretty.text "U ?") (prettyTy tyNames a)
-    ExpectedArrow tyNames a -> tmismatch (Pretty.text "? -> ?") (prettyTy tyNames a)
-    ExpectedInductive tyNames a -> Pretty.hsep [prettyTy tyNames a, Pretty.text "is not an inductive type"]
-    ExpectedCoinductive tyNames a -> Pretty.hsep [prettyTy tyNames a, Pretty.text "is not a coinductive type"]
-    ExpectedForall tyNames a -> tmismatch (Pretty.text "forall (? : ?). ?") (prettyTy tyNames a)
-    TypeMismatch tyNames a b -> tmismatch (prettyTy tyNames a) (prettyTy tyNames b)
+    ExpectedF tyNames a ->
+      tmismatch (Pretty.text "F ?") (prettyTy tyNames a)
+    ExpectedU tyNames a ->
+      tmismatch (Pretty.text "U ?") (prettyTy tyNames a)
+    ExpectedArrow tyNames a ->
+      tmismatch (Pretty.text "? -> ?") (prettyTy tyNames a)
+    ExpectedInductive tyNames a ->
+      Pretty.hsep [prettyTy tyNames a, Pretty.text "is not an inductive type"]
+    ExpectedCoinductive tyNames a ->
+      Pretty.hsep [prettyTy tyNames a, Pretty.text "is not a coinductive type"]
+    ExpectedForall tyNames a ->
+      tmismatch (Pretty.text "forall (? : ?). ?") (prettyTy tyNames a)
+    TypeMismatch tyNames a b ->
+      tmismatch (prettyTy tyNames a) (prettyTy tyNames b)
     CtorExpectedArity a b ->
       Pretty.hsep
       [ Pretty.text "Incorrect number of arguments to constructor: Expected"
@@ -191,41 +198,51 @@ findCoIndDtor a = view coIndDecls >>= go
         (\_ -> go ts)
 
 data KindError
-  = ExpectedCType Kind
-  | ExpectedVType Kind
-  | ExpectedKArr Kind
-  | KindMismatch Kind Kind
+  = ExpectedKArr (Int -> Maybe Doc) Ty Kind
+  | KindMismatch (Int -> Maybe Doc) Ty Kind Kind
   | TypeNotInScope (Int -> Maybe Doc) Int
+  | InductiveShouldBeVal Text Kind
+  | CoinductiveShouldBeComp Text Kind
 makeClassyPrisms ''KindError
 
 prettyKindError :: KindError -> Doc
 prettyKindError ke =
   case ke of
-    ExpectedCType a ->
+    ExpectedKArr tyNames ty a ->
       Pretty.hsep
-      [ Pretty.text "Kind mismatch: Expected Comp, but got"
-      , prettyKind a
+      [ Pretty.text "Kind mismatch: Type"
+      , Pretty.squotes $ prettyTy tyNames ty
+      , Pretty.text "should have kind '? -> ?', but it has kind"
+      , Pretty.squotes $ prettyKind a
       ]
-    ExpectedVType a ->
+    KindMismatch tyNames ty a b ->
       Pretty.hsep
-      [ Pretty.text "Kind mismatch: Expected Val, but got"
-      , prettyKind a
-      ]
-    ExpectedKArr a ->
-      Pretty.hsep
-      [ Pretty.text "Kind mismatch: Expected ? -> ?, but got"
-      , prettyKind a
-      ]
-    KindMismatch a b ->
-      Pretty.hsep
-      [ Pretty.text "Kind mismatch: Expected"
-      , prettyKind a <> Pretty.comma
-      , Pretty.text "but got"
-      , prettyKind b
+      [ Pretty.text "Kind mismatch: Type"
+      , Pretty.squotes $ prettyTy tyNames ty
+      , Pretty.text "should have kind"
+      , Pretty.squotes $ prettyKind a
+      , Pretty.text "but it has kind"
+      , Pretty.squotes $ prettyKind b
       ]
     TypeNotInScope tyNames n ->
       fromMaybe (Pretty.char '#' <> Pretty.int n) (tyNames n) <>
       Pretty.text " not in scope"
+    InductiveShouldBeVal n k ->
+      Pretty.hsep
+      [ Pretty.text "Inductive type"
+      , Pretty.squotes . Pretty.text $ Text.unpack n
+      , Pretty.text "should have kind 'Val'"
+      , Pretty.text "but it has kind"
+      , Pretty.squotes $ prettyKind k
+      ]
+    CoinductiveShouldBeComp n k ->
+      Pretty.hsep
+      [ Pretty.text "Coinductive type"
+      , Pretty.squotes . Pretty.text $ Text.unpack n
+      , Pretty.text "should have kind 'Comp'"
+      , Pretty.text "but it has kind"
+      , Pretty.squotes $ prettyKind k
+      ]
 
 ix :: Int -> [a] -> Maybe a
 ix _ [] = Nothing
@@ -303,14 +320,18 @@ inferKind ty =
       aKind <- inferKind a
       case aKind of
         KArr x y -> y <$ checkKind b x
-        _ -> throwError $ _ExpectedKArr # aKind
+        _ -> do
+          tyNames <- asks (namesDoc . _envTyNames)
+          throwError $ _ExpectedKArr # (tyNames, a, aKind)
 
 checkKind ::
   (AsScopeError e, AsKindError e, MonadError e m, MonadReader TCEnv m) =>
   Ty -> Kind -> m ()
 checkKind ty k = do
   k' <- inferKind ty
-  unless (k == k') . throwError $ _KindMismatch # (k, k')
+  unless (k == k') $ do
+    tyNames <- asks (namesDoc . _envTyNames)
+    throwError $ _KindMismatch # (tyNames, ty, k, k')
 
 checkCtor ::
   (AsScopeError e, AsKindError e, AsTypeError e, MonadError e m, MonadReader TCEnv m) =>
@@ -372,8 +393,11 @@ infer c =
         _ -> do
           tyNames <- asks (namesDoc . _envTyNames)
           throwError $ _ExpectedForall # (tyNames, aTy)
-    AbsTy n k a ->
-      TForall n k  <$> locally envKinds (k :) (infer a)
+    AbsTy name k a ->
+      fmap (TForall name k) .
+      locally envKinds (k :) .
+      locally envTyNames (\f -> \case; 0 -> name; n -> f (n-1)) $
+      infer a
     Name n -> do
       (_, ty) <- lookupDecl n
       pure ty
@@ -386,23 +410,34 @@ infer c =
         Just t -> pure t
     Thunk a -> TApp U <$> infer a
     Return a -> TApp F <$> infer a
-    Abs _ ty a -> do
+    Abs name ty a -> do
       checkKind ty KVal
-      TApp (TApp Arrow ty) <$> locally envTypes (ty :) (infer a)
-    Bind _ a b -> do
+      fmap (TApp (TApp Arrow ty)) .
+        locally envTypes (ty :) .
+        locally envVarNames (\f -> \case; 0 -> name; n -> f (n-1)) $
+        infer a
+    Bind name a b -> do
       aTy <- infer a
       case aTy of
-        TApp F i -> locally envTypes (i :) $ infer b
+        TApp F i ->
+          locally envTypes (i :) .
+          locally envVarNames (\f -> \case; 0 -> name; n -> f (n-1)) $
+          infer b
         _ -> do
           tyNames <- asks (namesDoc . _envTyNames)
           throwError $ _ExpectedF # (tyNames, aTy)
-    Let _ a b -> do
+    Let name a b -> do
       aTy <- infer a
-      locally envTypes (aTy :) $ infer b
-    Fix _ t a ->
+      locally envTypes (aTy :) .
+        locally envVarNames (\f -> \case; 0 -> name; n -> f (n-1)) $
+        infer b
+    Fix name t a ->
       case t of
         TApp U t' -> do
-          aTy <- locally envTypes (t :) $ infer a
+          aTy <-
+            locally envTypes (t :) .
+            locally envVarNames (\f -> \case; 0 -> name; n -> f (n-1)) $
+            infer a
           unless (aTy == t') $ do
             tyNames <- asks (namesDoc . _envTyNames)
             throwError $ _TypeMismatch # (tyNames, t', aTy)
@@ -473,7 +508,8 @@ checkIndDecl ::
   ) =>
   IndDecl -> m ()
 checkIndDecl decl = do
-  unless (k == KVal) . throwError $ _KindMismatch # (KVal, k)
+  unless (k == KVal) . throwError $
+    _InductiveShouldBeVal # (_indTypeName decl, k)
   for_ (_indCtors decl) $ \ctor ->
     locally envKinds (params <>) $
     for_ (_indCtorArgs ctor) $ \argTy ->
@@ -488,7 +524,7 @@ checkCoIndDecl ::
   CoIndDecl -> m ()
 checkCoIndDecl decl = do
   unless (k == KComp) . throwError $
-    _KindMismatch # (KComp, k)
+    _CoinductiveShouldBeComp # (_coIndTypeName decl, k)
   for_ (_coIndDtors decl) $ \dtor ->
     locally envKinds (params <>) .
     locally envCoIndDecls (decl :) $
@@ -524,17 +560,17 @@ checkModule (MCoIndDecl d rest) = do
 
 data TCError
   = TCScopeError ScopeError
-  | TCTypeError TypeError
+  | TCompError TypeError
   | TCKindError KindError
 makePrisms ''TCError
 
 prettyTCError :: TCError -> Doc
 prettyTCError (TCKindError a) = prettyKindError a
-prettyTCError (TCTypeError a) = prettyTypeError a
+prettyTCError (TCompError a) = prettyTypeError a
 prettyTCError (TCScopeError a) = prettyScopeError a
 
 instance AsScopeError TCError where; _ScopeError = _TCScopeError
-instance AsTypeError TCError where; _TypeError = _TCTypeError
+instance AsTypeError TCError where; _TypeError = _TCompError
 instance AsKindError TCError where; _KindError = _TCKindError
 
 tc ::
