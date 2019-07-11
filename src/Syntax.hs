@@ -195,6 +195,7 @@ data Exp (a :: Sort) where
 
   -- values
   Var :: !Int -> Exp 'V
+  Addr :: !Int -> Exp 'V
   Thunk :: Exp 'C -> Exp 'V
   --                          VType
   Ctor :: Text -> [Exp 'V] -> Exp 'V
@@ -223,6 +224,7 @@ abstract n = go 0
     go :: Int -> Exp a -> Exp a
     go !depth tm =
       case tm of
+        Addr x -> Addr x
         App a b -> App (go depth a) (go depth b)
         Abs name k a -> Abs name k $ go (depth+1) a
         Bind name v a -> Bind name (go depth v) $ go (depth+1) a
@@ -263,6 +265,7 @@ abstractTyExp n = go 0
     go :: Int -> Exp a -> Exp a
     go !depth tm =
       case tm of
+        Addr x -> Addr x
         App a b -> App (go depth a) (go depth b)
         Abs name t a -> Abs name (goTy depth t) (go depth a)
         Bind name v a -> Bind name (go depth v) (go depth a)
@@ -295,6 +298,7 @@ rho f n = f (n-1) + 1
 rename :: (Int -> Int) -> Exp a -> Exp a
 rename f c =
   case c of
+    Addr x -> Addr x
     Ann a b -> Ann (rename f a) b
 
     Name a -> Name a
@@ -326,6 +330,7 @@ rename f c =
 renameTyExp :: (Int -> Int) -> Exp a -> Exp a
 renameTyExp f c =
   case c of
+    Addr x -> Addr x
     Ann a b -> Ann (renameTyExp f a) (renameTy f b)
 
     Name a -> Name a
@@ -359,6 +364,7 @@ sigma f n = rename (+1) $ f (n-1)
 subst :: (Int -> Exp 'V) -> Exp a -> Exp a
 subst f c =
   case c of
+    Addr x -> Addr x
     Ann a b -> Ann (subst f a) b
 
     Name a -> Name a
@@ -391,6 +397,7 @@ subst f c =
 substTyExp :: (Int -> Ty) -> Exp a -> Exp a
 substTyExp f c =
   case c of
+    Addr x -> Addr x
     Ann a b -> Ann (substTyExp f a) (substTy f b)
 
     Name a -> Name a

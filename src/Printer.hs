@@ -26,6 +26,7 @@ prettyPat p@(PCtor n _ _) =
 prettyExp :: (Int -> Maybe Doc) -> (Int -> Maybe Doc) -> Exp a -> Doc
 prettyExp names tyNames tm =
   case tm of
+    Addr{} -> error "Addr"
     AbsTy name k a ->
       let m_ndoc = Pretty.text . Text.unpack <$> name in
       Pretty.text "\\@" <>

@@ -386,6 +386,7 @@ infer ::
   Exp a -> m Ty
 infer c =
   case c of
+    Addr{} -> error "Addr"
     AppTy a t -> do
       aTy <- infer a
       case aTy of

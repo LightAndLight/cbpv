@@ -16,7 +16,13 @@ category:            Language
 extra-source-files:  CHANGELOG.md
 
 library
-  exposed-modules:     Syntax, Semantics, Typecheck, Printer, Parser, Compiler
+  exposed-modules:     Syntax
+                     , Semantics
+                     , Semantics.CBNeed
+                     , Typecheck
+                     , Printer
+                     , Parser
+                     , Compiler
   build-depends:       base ^>=4.12.0.0
                      , attoparsec
                      , ansi-wl-pprint ^>=0.6

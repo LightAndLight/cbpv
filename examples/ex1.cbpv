@@ -1,5 +1,7 @@
 data Sum (a : Val) (b : Val) where { Left[a]; Right[b] }
 
+codata UU (a : Comp) where { faws[] : a }
+
 sumElim = {
   thunk[ 
     \@(a : Val) ->
@@ -41,6 +43,7 @@ codata Stream (a : Comp) where {
   head[] : a;
   tail[] : Stream a
 }
+
 
 takeS = {
   thunk[
