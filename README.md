@@ -75,7 +75,7 @@ takeS = {
     \@(a : Comp) ->
     fix self : U (forall (a : Comp). Nat -> U (Stream a) -> F (List (U a))) in
     \(n : Nat) ->
-    \(s : U (Stream a) n -> 
+    \(s : U (Stream a)) -> 
     case n of { 
       Z -> return[Nil[]]; 
       S[k] -> 
