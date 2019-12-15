@@ -87,9 +87,9 @@ takeS = {
   ]
 }
 
-codata AlephNull where { next : AlephNull }
+codata Infinity where { next : Infinity }
   
-infinity = thunk[ fix self : U AlephNull in cocase AlephNull of { next -> force[self] } ]
+infinity = thunk[ fix self : U Infinity in cocase Infinity of { next -> force[self] } ]
 
 countFrom = {
   thunk[
