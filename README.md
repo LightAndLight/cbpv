@@ -21,6 +21,10 @@ A usable type system for call by push-value:
     * Destructors are not functions
     * Generalised introduction using `cocase ... of`
 
+* Syntax
+  * `#` (thunk) takes a `a : Comp` and produces a `U a : Val`
+  * `^` (force) takes a `U a : Val` and produces a `a : Comp`
+
 ## Examples
 
 (actual syntax) (braces are how I ignore layout rules)
@@ -29,7 +33,7 @@ A usable type system for call by push-value:
 data Sum (a : Val) (b : Val) = Left[a] | Right[b]
 
 sumElim = {
-  thunk[ 
+  #
     \@(a : Val) ->
     \@(b : Val) ->
     \@(r : Comp) ->
@@ -37,23 +41,21 @@ sumElim = {
     \(g : U (b -> r)) ->
     \(x : Sum a b) ->
     case x of { 
-      Left[a] -> force[f] a; 
-      Right[a] -> force[g] a 
+      Left[a] -> ^f a; 
+      Right[a] -> ^g a 
     } 
-  ]
 }
 
 data Tensor (a : Val) (b : Val) = Tensor[a, b]
 
 tensorElim = {
-  thunk[ 
+  #
     \@(a : Val) ->
     \@(b : Val) ->
     \@(r : Comp) ->
     \(f : U (a -> b -> r)) ->
     \(x : Tensor a b) -> 
-    case x of { Tensor[a, b] -> force[f] a b } 
-  ]
+    case x of { Tensor[a, b] -> ^f a b } 
 }
 
 data Nat = Z[] | S[Nat]
@@ -71,7 +73,7 @@ codata Stream (a : Comp) where {
 }
 
 takeS = {
-  thunk[
+  #
     \@(a : Comp) ->
     fix self : U (forall (a : Comp). Nat -> U (Stream a) -> F (List (U a))) in
     \(n : Nat) ->
@@ -80,25 +82,23 @@ takeS = {
       Z -> return[Nil[]]; 
       S[k] -> 
         bind 
-          rest = self k thunk[ force[s].tail ]
+          rest = self k (# ^s.tail)
         in 
-          return[ Cons[ thunk[ force[s].head ], rest ] ]
+          return[ Cons[ # ^s.head ], rest ] ]
     }
-  ]
 }
 
 codata Infinity where { next : Infinity }
   
-infinity = thunk[ fix self : U Infinity in cocase Infinity of { next -> force[self] } ]
+infinity = # fix self : U Infinity in cocase Infinity of { next -> ^self }
 
 countFrom = {
-  thunk[
+  #
     fix self : U (Nat -> Stream (F Nat))) in
     \(n : Nat) -> 
     cocase Stream (F Nat) of { 
       head -> return[n]; 
-      tail -> force[self] S[n]
+      tail -> ^self S[n]
     }
-  ]
 }
 ```

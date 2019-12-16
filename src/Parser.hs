@@ -168,7 +168,14 @@ mkAnn ex =
 
 computation :: (Monad m, TokenParsing m) => m (Exp 'C)
 computation =
-  (lam <|> ann <|> case_ <|> cocase <|> let_ <|> fix <|> bind) <?> "computation"
+  (lam <?> "lambda") <|>
+   ann <|>
+  (case_ <?> "case expression") <|>
+  (cocase <?> "cocase expression") <|>
+  (let_ <?> "let expression") <|>
+  (fix <?> "fixed point expression") <|>
+  (bind <?> "bind expression") <?>
+  "computation"
   where
     lam =
       either
@@ -215,10 +222,16 @@ computation =
     atom =
       Return <$ keyword "return" <*> Token.brackets value <|>
       Force <$ keyword "force" <*> Token.brackets value <|>
+      Force <$ Token.symbolic '^' <*> value <|>
       Token.parens computation
 
 value :: (Monad m, TokenParsing m) => m (Exp 'V)
-value = (case_ <|> let_ <|> ann <|> absTy) <?> "value"
+value =
+  (Thunk <$ Token.symbolic '#' <*> computation <|>
+   case_ <|>
+   let_ <|>
+   ann <|>
+   absTy) <?> "value"
   where
     ann = mkAnn atom
     absTy =
